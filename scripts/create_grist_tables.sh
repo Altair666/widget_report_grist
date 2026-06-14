@@ -6,7 +6,7 @@ set -e
 
 HOST="https://lmp-test-dec.getgrist.com"
 DOC_ID="5GtDphApyrjG"
-API_KEY="0147018d475a6b3c9327441a74398debe41a76d8"   # ⚠ ОТЗОВИ после использования
+API_KEY="${GRIST_API_KEY:?set GRIST_API_KEY env var}"   # ⚠ ОТЗОВИ после использования
 
 echo "→ Создаю таблицу Templates..."
 curl -sS -X POST "$HOST/api/docs/$DOC_ID/tables" \
