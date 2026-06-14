@@ -124,7 +124,7 @@
   /* =================  EDITOR VIEW  ================= */
   #editor-view {
     display: none;
-    grid-template-rows: auto auto 1fr;
+    grid-template-rows: auto 1fr;
     gap: 10px;
     padding: 10px;
     height: 100%;
@@ -133,7 +133,7 @@
 
   #editor-count-row {
     display: flex; align-items: center; gap: 8px;
-    padding: 4px 2px 0;
+    margin-bottom: 10px;
   }
   #editor-count-row label {
     font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px;
@@ -183,6 +183,16 @@
     background: var(--accent); color: white; border-radius: 10px;
     padding: 1px 7px; font-size: 11px;
   }
+
+  .drag-row { display: flex; align-items: center; gap: 6px; }
+  .rotate-btn {
+    flex: none; width: 28px; height: 28px;
+    border: 1px solid var(--border); border-radius: 4px;
+    background: var(--panel); cursor: pointer; font-size: 15px; line-height: 1;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .rotate-btn:hover { background: #f0f4ff; }
+  .rotate-btn.active { background: var(--accent); color: white; border-color: var(--accent); }
 
   .group-tabs { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
   .group-tab {
@@ -236,7 +246,7 @@
   }
   .placed-field {
     position: absolute; background: rgba(47, 111, 235, 0.88); color: white;
-    padding: 3px 8px; border-radius: 4px; font-size: 11px; cursor: move;
+    padding: 3.15px 8.4px; border-radius: 4px; font-size: 11.55px; cursor: move;
     user-select: none; white-space: nowrap;
     box-shadow: 0 1px 3px rgba(0,0,0,0.25);
   }
@@ -350,22 +360,30 @@
 <!-- =================  EDITOR VIEW  ================= -->
 <div id="editor-view">
 
-  <div id="editor-count-row">
-    <label for="count-input">Кол-во групп:</label>
-    <input type="number" id="count-input" min="1" max="20" value="1" />
-  </div>
-
   <div id="editor-toolbar">
 
     <div class="field-block" id="config-block">
       <label>Конфигурация изделия</label>
       <div class="config-inner">
         <div class="drag-col">
-          <span class="draggable-source" data-type="config" draggable="true">＋ Конфигурация <span class="badge" id="badge-config">1</span></span>
-          <span class="draggable-source" data-type="serial" draggable="true" style="background:#fdecec;border-color:var(--danger);color:var(--danger);">＋ Серийный № <span class="badge" id="badge-serial" style="background:var(--danger)">1</span></span>
-          <span class="draggable-source" data-type="date" draggable="true" style="background:#e9f6ed;border-color:var(--ok);color:var(--ok);">＋ Дата <span class="badge" id="badge-date" style="background:var(--ok)">1</span></span>
+          <div class="drag-row">
+            <button class="rotate-btn" data-type="config" title="Повернуть поля «Конфигурация» активной группы на 180°">↻</button>
+            <span class="draggable-source" data-type="config" draggable="true">＋ Конфигурация <span class="badge" id="badge-config">1</span></span>
+          </div>
+          <div class="drag-row">
+            <button class="rotate-btn" data-type="serial" title="Повернуть поля «Серийный №» активной группы на 180°">↻</button>
+            <span class="draggable-source" data-type="serial" draggable="true" style="background:#fdecec;border-color:var(--danger);color:var(--danger);">＋ Серийный № <span class="badge" id="badge-serial" style="background:var(--danger)">1</span></span>
+          </div>
+          <div class="drag-row">
+            <button class="rotate-btn" data-type="date" title="Повернуть поля «Дата» активной группы на 180°">↻</button>
+            <span class="draggable-source" data-type="date" draggable="true" style="background:#e9f6ed;border-color:var(--ok);color:var(--ok);">＋ Дата <span class="badge" id="badge-date" style="background:var(--ok)">1</span></span>
+          </div>
         </div>
         <div class="group-col">
+          <div id="editor-count-row">
+            <label for="count-input">Кол-во групп:</label>
+            <input type="number" id="count-input" min="1" max="20" value="1" />
+          </div>
           <label style="margin-bottom:4px;">Активная группа</label>
           <div class="group-tabs" id="group-tabs"></div>
         </div>
@@ -402,7 +420,7 @@
 /* ====================================================================
    GLOBAL STATE
    ==================================================================== */
-const VERSION = 'v0.4.0';
+const VERSION = 'v0.5.0';
 const STORAGE_KEY = 'widget_report_grist_templates_v1';
 const FILTERS_KEY = 'widget_report_grist_lastfilters_v1';
 
@@ -625,6 +643,7 @@ function showEditor(existingTplId = null) {
   state.activeGroup = 1;
   renderGroupTabs();
   updateBadges();
+  updateRotateButtons();
 
   if (state.pdfBase64) {
     renderPdfFromBase64(state.pdfBase64);
@@ -872,13 +891,18 @@ async function printPdf() {
       if (!value) continue;
 
       const { width, height } = page.getSize();
-      page.drawText(value, {
-        x: f.x * width,
-        y: height - f.y * height - 10,
-        size: 10,
-        font,
-        color: PDFLib.rgb(0, 0, 0),
-      });
+      const size = 10;
+      let x = f.x * width;
+      let y = height - f.y * height - 10;
+      const drawOpts = { size, font, color: PDFLib.rgb(0, 0, 0) };
+      if (f.rotated) {
+        // rotating around (x,y) flips the text to extend down-left;
+        // shift the anchor so the rotated text covers roughly the same spot
+        drawOpts.rotate = PDFLib.degrees(180);
+        x += font.widthOfTextAtSize(value, size);
+        y += size;
+      }
+      page.drawText(value, { x, y, ...drawOpts });
     }
 
     const outBytes = await pdfDoc.save();
@@ -902,7 +926,7 @@ function renderGroupTabs() {
     const tab = document.createElement('div');
     tab.className = 'group-tab' + (i === state.activeGroup ? ' active' : '');
     tab.textContent = `Группа ${i}`;
-    tab.onclick = () => { state.activeGroup = i; renderGroupTabs(); };
+    tab.onclick = () => { state.activeGroup = i; renderGroupTabs(); updateBadges(); updateRotateButtons(); };
     c.appendChild(tab);
   }
 }
@@ -989,14 +1013,26 @@ function bindDropTarget(overlay, pageNum) {
     let data;
     try { data = JSON.parse(e.dataTransfer.getData('text/plain')); } catch { return; }
     const rect = overlay.getBoundingClientRect();
-    const x = (e.clientX - rect.left) / rect.width;
-    const y = (e.clientY - rect.top) / rect.height;
+    let x = (e.clientX - rect.left) / rect.width;
+    let y = (e.clientY - rect.top) / rect.height;
 
     if (data.new) {
-      state.placedFields.push({ id: uuid(), type: data.type, group: data.group, page: pageNum, x, y });
+      state.placedFields.push({ id: uuid(), type: data.type, group: data.group, page: pageNum, x, y, rotated: false });
     } else {
       const f = state.placedFields.find(f => f.id === data.id);
-      if (f) { f.page = pageNum; f.x = x; f.y = y; }
+      if (f) {
+        // compensate for where on the badge the user grabbed it, so it doesn't
+        // jump to align its top-left corner with the cursor on drop
+        if (typeof data.offX === 'number') {
+          const el = document.querySelector(`.placed-field[data-id="${f.id}"]`);
+          if (el) {
+            const elRect = el.getBoundingClientRect();
+            x -= (data.offX * elRect.width) / rect.width;
+            y -= (data.offY * elRect.height) / rect.height;
+          }
+        }
+        f.page = pageNum; f.x = x; f.y = y;
+      }
     }
     redrawPlacedFields();
   });
@@ -1015,9 +1051,13 @@ function redrawPlacedFields() {
     el.innerHTML = `<span>G${f.group}: ${labels[f.type]}</span><span class="x" data-act="del">✕</span>`;
     el.style.left = (f.x * wrap.clientWidth) + 'px';
     el.style.top  = (f.y * wrap.clientHeight) + 'px';
+    if (f.rotated) el.style.transform = 'rotate(180deg)';
 
     el.addEventListener('dragstart', e => {
-      e.dataTransfer.setData('text/plain', JSON.stringify({ id: f.id, new: false }));
+      const elRect = el.getBoundingClientRect();
+      const offX = (e.clientX - elRect.left) / elRect.width;
+      const offY = (e.clientY - elRect.top) / elRect.height;
+      e.dataTransfer.setData('text/plain', JSON.stringify({ id: f.id, new: false, offX, offY }));
     });
     el.querySelector('[data-act=del]').addEventListener('click', ev => {
       ev.stopPropagation();
@@ -1025,6 +1065,15 @@ function redrawPlacedFields() {
       redrawPlacedFields();
     });
     wrap.appendChild(el);
+  });
+  updateRotateButtons();
+}
+
+function updateRotateButtons() {
+  $$('.rotate-btn').forEach(btn => {
+    const type = btn.dataset.type;
+    const matching = state.placedFields.filter(f => f.type === type && f.group === state.activeGroup);
+    btn.classList.toggle('active', matching.length > 0 && matching.every(f => f.rotated));
   });
 }
 
@@ -1057,7 +1106,6 @@ async function saveTemplate() {
 }
 
 function resetTemplate() {
-  if (!confirm('Сбросить все размещённые поля?')) return;
   state.placedFields = [];
   redrawPlacedFields();
 }
@@ -1093,6 +1141,17 @@ function bindEvents() {
     renderGroupTabs();
     updateBadges();
     redrawPlacedFields();
+  });
+
+  $$('.rotate-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const type = btn.dataset.type;
+      const matching = state.placedFields.filter(f => f.type === type && f.group === state.activeGroup);
+      if (matching.length === 0) { toast('Нет полей этого типа в активной группе'); return; }
+      const allRotated = matching.every(f => f.rotated);
+      matching.forEach(f => { f.rotated = !allRotated; });
+      redrawPlacedFields();
+    });
   });
 }
 
