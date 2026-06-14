@@ -122,42 +122,89 @@
   /* =================  EDITOR VIEW  ================= */
   #editor-view {
     display: none;
-    grid-template-rows: auto 1fr;
+    grid-template-rows: auto auto 1fr;
     gap: 10px;
     padding: 10px;
     height: 100%;
   }
   #editor-view.show { display: grid; }
 
+  #editor-count-row {
+    display: flex; align-items: center; gap: 8px;
+    padding: 4px 2px 0;
+  }
+  #editor-count-row label {
+    font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px;
+  }
+  #count-input {
+    width: 64px; padding: 4px 6px; border: 1px solid var(--border); border-radius: 4px;
+  }
+
   #editor-toolbar {
     display: grid;
-    grid-template-columns: 1fr 1fr auto;
+    grid-template-columns: 2fr 1.2fr auto;
     gap: 8px;
-    align-items: start;
+    align-items: stretch;
   }
   .field-block {
     background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius);
-    padding: 8px 10px;
+    padding: 10px 12px;
+    display: flex; flex-direction: column;
   }
-  .field-block label { font-size: 11px; color: var(--muted); text-transform: uppercase; }
-  .field-row { display: flex; gap: 8px; align-items: center; margin-top: 4px; }
+  .field-block > label {
+    font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px;
+    margin-bottom: 8px;
+  }
+
+  /* Конфигурация изделия — два столбца: drag-источники слева, активная группа справа */
+  #config-block .config-inner {
+    display: grid; grid-template-columns: 1fr auto; gap: 16px;
+    flex: 1; align-items: start;
+  }
+  .drag-col { display: flex; flex-direction: column; gap: 6px; }
+  .group-col {
+    display: flex; flex-direction: column;
+    border-left: 1px solid var(--border); padding-left: 14px;
+    min-width: 140px;
+  }
+  .group-col > label {
+    font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px;
+  }
+
   .draggable-source {
     background: #eef3ff; border: 1px dashed var(--accent); border-radius: 4px;
     padding: 6px 10px; cursor: grab; font-weight: 500; user-select: none;
-    display: inline-flex; align-items: center; gap: 6px;
+    display: inline-flex; align-items: center; gap: 6px; align-self: flex-start;
   }
   .draggable-source:active { cursor: grabbing; }
   .draggable-source .badge {
     background: var(--accent); color: white; border-radius: 10px;
     padding: 1px 7px; font-size: 11px;
   }
+
   .group-tabs { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
   .group-tab {
     background: #eef0f3; border: 1px solid var(--border); border-radius: 4px;
     padding: 3px 10px; font-size: 12px; cursor: pointer;
   }
   .group-tab.active { background: var(--accent); color: white; border-color: var(--accent); }
-  #count-input { width: 60px; padding: 4px 6px; border: 1px solid var(--border); border-radius: 4px; }
+
+  /* Имя шаблона — растягивается на высоту config-block */
+  #name-block #tpl-name {
+    width: 100%; padding: 6px 8px;
+    border: 1px solid var(--border); border-radius: 4px;
+  }
+  #name-block .name-bottom { margin-top: auto; padding-top: 10px; }
+
+  /* Кнопки действий — вертикально, одного размера */
+  .editor-actions {
+    display: flex; flex-direction: column; gap: 6px;
+    justify-content: flex-start;
+  }
+  .action-btn {
+    min-width: 130px; padding: 8px 12px;
+    text-align: center;
+  }
 
   .toolbar-btn {
     padding: 8px 16px; border: 1px solid var(--border); border-radius: var(--radius);
@@ -167,8 +214,7 @@
   .toolbar-btn.primary:hover { background: var(--accent-hover); }
   .toolbar-btn.danger { color: var(--danger); }
   .toolbar-btn:hover:not(:disabled) { background: #f0f4ff; }
-
-  .editor-actions { display: flex; gap: 8px; align-items: flex-start; }
+  .toolbar-btn.primary:hover:not(:disabled) { background: var(--accent-hover); }
 
   #pdf-area {
     background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius);
@@ -302,41 +348,41 @@
 <!-- =================  EDITOR VIEW  ================= -->
 <div id="editor-view">
 
+  <div id="editor-count-row">
+    <label for="count-input">Кол-во групп:</label>
+    <input type="number" id="count-input" min="1" max="20" value="1" />
+  </div>
+
   <div id="editor-toolbar">
 
-    <div class="field-block">
+    <div class="field-block" id="config-block">
       <label>Конфигурация изделия</label>
-      <div class="field-row">
-        <span class="draggable-source" data-type="config" draggable="true">＋ Конфигурация <span class="badge type-config-badge" id="badge-config">1</span></span>
-        <label style="font-size:11px;color:var(--muted);">кол-во групп:</label>
-        <input type="number" id="count-input" min="1" max="20" value="1" />
-      </div>
-      <div class="field-row" style="margin-top:8px;">
-        <span class="draggable-source" data-type="serial" draggable="true" style="background:#fdecec;border-color:var(--danger);color:var(--danger);">＋ Серийный № <span class="badge" id="badge-serial" style="background:var(--danger)">1</span></span>
-      </div>
-      <div class="field-row" style="margin-top:6px;">
-        <span class="draggable-source" data-type="date" draggable="true" style="background:#e9f6ed;border-color:var(--ok);color:var(--ok);">＋ Дата <span class="badge" id="badge-date" style="background:var(--ok)">1</span></span>
+      <div class="config-inner">
+        <div class="drag-col">
+          <span class="draggable-source" data-type="config" draggable="true">＋ Конфигурация <span class="badge" id="badge-config">1</span></span>
+          <span class="draggable-source" data-type="serial" draggable="true" style="background:#fdecec;border-color:var(--danger);color:var(--danger);">＋ Серийный № <span class="badge" id="badge-serial" style="background:var(--danger)">1</span></span>
+          <span class="draggable-source" data-type="date" draggable="true" style="background:#e9f6ed;border-color:var(--ok);color:var(--ok);">＋ Дата <span class="badge" id="badge-date" style="background:var(--ok)">1</span></span>
+        </div>
+        <div class="group-col">
+          <label style="margin-bottom:4px;">Активная группа</label>
+          <div class="group-tabs" id="group-tabs"></div>
+        </div>
       </div>
     </div>
 
-    <div class="field-block">
-      <label>Активная группа</label>
-      <div class="group-tabs" id="group-tabs"></div>
-      <div style="margin-top:10px;">
-        <label>Имя шаблона</label>
-        <input type="text" id="tpl-name" placeholder="например: Бланк ОТК"
-          style="width:100%;padding:4px 6px;border:1px solid var(--border);border-radius:4px;margin-top:4px;" />
-      </div>
-      <div style="margin-top:8px;">
+    <div class="field-block" id="name-block">
+      <label>Имя шаблона</label>
+      <input type="text" id="tpl-name" placeholder="например: Бланк ОТК" />
+      <div class="name-bottom">
         <button class="toolbar-btn" id="btn-load-pdf">Загрузить PDF</button>
         <input type="file" id="pdf-file" accept="application/pdf" hidden />
       </div>
     </div>
 
     <div class="editor-actions">
-      <button class="toolbar-btn" id="btn-back">← Назад</button>
-      <button class="toolbar-btn danger" id="btn-reset">Сбросить</button>
-      <button class="toolbar-btn primary" id="btn-save">Сохранить</button>
+      <button class="toolbar-btn primary action-btn" id="btn-save">Сохранить</button>
+      <button class="toolbar-btn danger  action-btn" id="btn-reset">Сбросить</button>
+      <button class="toolbar-btn         action-btn" id="btn-back">Отменить</button>
     </div>
   </div>
 
@@ -354,8 +400,7 @@
 /* ====================================================================
    GLOBAL STATE
    ==================================================================== */
-const VERSION = 'v0.2.0';
-const BUILD_DATE = '2026-06-14';
+const VERSION = 'v0.3.0';
 const STORAGE_KEY = 'widget_report_grist_templates_v1';
 const FILTERS_KEY = 'widget_report_grist_lastfilters_v1';
 
@@ -901,9 +946,9 @@ function initGrist() {
    BOOT
    ==================================================================== */
 document.addEventListener('DOMContentLoaded', () => {
-  document.getElementById('version-badge').textContent = `${VERSION} · ${BUILD_DATE}`;
+  document.getElementById('version-badge').textContent = VERSION;
   document.title = `Widget Report — Grist (${VERSION})`;
-  console.log(`%cwidget_report_grist ${VERSION} (${BUILD_DATE})`, 'color:#2f6feb;font-weight:bold');
+  console.log(`%cwidget_report_grist ${VERSION}`, 'color:#2f6feb;font-weight:bold');
   initDate();
   bindEvents();
   renderLastFilters();
