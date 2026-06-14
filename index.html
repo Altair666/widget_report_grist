@@ -1,0 +1,900 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Widget Report — Grist</title>
+<script src="https://docs.getgrist.com/grist-plugin-api.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<style>
+  :root {
+    --bg: #f4f6f8;
+    --panel: #ffffff;
+    --border: #d9dde2;
+    --accent: #2f6feb;
+    --accent-hover: #275fd0;
+    --muted: #6b7480;
+    --danger: #d94646;
+    --ok: #2c9a4a;
+    --radius: 6px;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; height: 100%; background: var(--bg);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    font-size: 14px; color: #222; }
+  button { font: inherit; cursor: pointer; }
+  button:disabled { cursor: not-allowed; opacity: 0.5; }
+  input, select { font: inherit; }
+
+  /* =================  MAIN VIEW  ================= */
+  #main-view {
+    display: grid;
+    grid-template-rows: auto auto 1fr;
+    gap: 10px;
+    padding: 10px;
+    height: 100%;
+  }
+
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 10px;
+  }
+
+  /* --- Top: last used filters --- */
+  #last-filters {
+    min-height: 80px;
+    max-height: 140px;
+    overflow-y: auto;
+  }
+  #last-filters h3 {
+    margin: 0 0 6px; font-size: 13px; color: var(--muted);
+    text-transform: uppercase; letter-spacing: 0.5px;
+  }
+  .filter-chip {
+    display: inline-flex; align-items: center; gap: 6px;
+    background: #eef3ff; border: 1px solid #c8d6f5;
+    padding: 4px 10px; border-radius: 14px; margin: 2px 4px 2px 0;
+    font-size: 12px;
+  }
+  .filter-chip .author { color: var(--muted); font-size: 11px; }
+  .filter-empty { color: var(--muted); font-style: italic; font-size: 12px; }
+
+  /* --- Controls row: date / select / create / edit  +  export / print --- */
+  #controls {
+    display: grid;
+    grid-template-columns: 2fr 2fr 1fr 1fr;
+    grid-template-rows: 1fr 1fr;
+    gap: 8px;
+    height: 130px;
+  }
+  .ctl {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 8px 10px;
+    display: flex; flex-direction: column; justify-content: center;
+  }
+  .ctl-label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px; }
+  .ctl-btn {
+    background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 8px 10px; display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 4px; text-align: center; font-weight: 500;
+  }
+  .ctl-btn:hover:not(:disabled) { background: #f0f4ff; border-color: var(--accent); color: var(--accent); }
+  .ctl-btn .sub { font-size: 11px; color: var(--muted); font-weight: 400; }
+
+  .date-cell { grid-row: span 2; }
+  .select-cell { grid-row: span 2; }
+
+  #date-display { font-size: 16px; font-weight: 600; }
+  #date-pick { margin-top: 6px; }
+  #tpl-selected { font-size: 13px; color: var(--accent); font-weight: 500; }
+
+  /* --- Bottom area: filter header + filter results --- */
+  #filter-section {
+    display: grid;
+    grid-template-rows: auto 1fr;
+    gap: 8px;
+    min-height: 0;
+  }
+  #filter-header {
+    padding: 8px 10px;
+  }
+  #filter-header .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  #filter-header label { font-size: 12px; color: var(--muted); }
+  #filter-header select, #filter-header input {
+    border: 1px solid var(--border); border-radius: 4px; padding: 4px 8px;
+  }
+  #filter-results { overflow: auto; padding: 0; }
+  #filter-results table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  #filter-results th, #filter-results td {
+    text-align: left; padding: 6px 10px; border-bottom: 1px solid #eef0f3;
+    white-space: nowrap;
+  }
+  #filter-results th {
+    background: #f7f9fb; position: sticky; top: 0; font-weight: 600;
+    color: var(--muted); text-transform: uppercase; font-size: 11px; letter-spacing: 0.5px;
+  }
+  #filter-results tr:hover td { background: #f9fbff; }
+
+  /* =================  EDITOR VIEW  ================= */
+  #editor-view {
+    display: none;
+    grid-template-rows: auto 1fr;
+    gap: 10px;
+    padding: 10px;
+    height: 100%;
+  }
+  #editor-view.show { display: grid; }
+
+  #editor-toolbar {
+    display: grid;
+    grid-template-columns: 1fr 1fr auto;
+    gap: 8px;
+    align-items: start;
+  }
+  .field-block {
+    background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 8px 10px;
+  }
+  .field-block label { font-size: 11px; color: var(--muted); text-transform: uppercase; }
+  .field-row { display: flex; gap: 8px; align-items: center; margin-top: 4px; }
+  .draggable-source {
+    background: #eef3ff; border: 1px dashed var(--accent); border-radius: 4px;
+    padding: 6px 10px; cursor: grab; font-weight: 500; user-select: none;
+    display: inline-flex; align-items: center; gap: 6px;
+  }
+  .draggable-source:active { cursor: grabbing; }
+  .draggable-source .badge {
+    background: var(--accent); color: white; border-radius: 10px;
+    padding: 1px 7px; font-size: 11px;
+  }
+  .group-tabs { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+  .group-tab {
+    background: #eef0f3; border: 1px solid var(--border); border-radius: 4px;
+    padding: 3px 10px; font-size: 12px; cursor: pointer;
+  }
+  .group-tab.active { background: var(--accent); color: white; border-color: var(--accent); }
+  #count-input { width: 60px; padding: 4px 6px; border: 1px solid var(--border); border-radius: 4px; }
+
+  .toolbar-btn {
+    padding: 8px 16px; border: 1px solid var(--border); border-radius: var(--radius);
+    background: var(--panel); font-weight: 500;
+  }
+  .toolbar-btn.primary { background: var(--accent); color: white; border-color: var(--accent); }
+  .toolbar-btn.primary:hover { background: var(--accent-hover); }
+  .toolbar-btn.danger { color: var(--danger); }
+  .toolbar-btn:hover:not(:disabled) { background: #f0f4ff; }
+
+  .editor-actions { display: flex; gap: 8px; align-items: flex-start; }
+
+  #pdf-area {
+    background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius);
+    position: relative; overflow: auto; min-height: 0;
+  }
+  #pdf-empty {
+    position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+    color: var(--muted); font-style: italic; pointer-events: none;
+  }
+  .pdf-page-wrap {
+    position: relative; margin: 10px auto; box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+    background: white;
+  }
+  .pdf-page-wrap canvas { display: block; }
+  .drop-overlay {
+    position: absolute; inset: 0;
+  }
+  .placed-field {
+    position: absolute; background: rgba(47, 111, 235, 0.88); color: white;
+    padding: 3px 8px; border-radius: 4px; font-size: 11px; cursor: move;
+    user-select: none; white-space: nowrap;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.25);
+  }
+  .placed-field.type-config { background: rgba(47, 111, 235, 0.88); }
+  .placed-field.type-serial { background: rgba(217, 70, 70, 0.88); }
+  .placed-field.type-date   { background: rgba(44, 154, 74, 0.88); }
+  .placed-field .x { margin-left: 6px; opacity: 0.7; cursor: pointer; }
+  .placed-field .x:hover { opacity: 1; }
+
+  /* ============== Modal ============== */
+  .modal-back {
+    position: fixed; inset: 0; background: rgba(0,0,0,0.4);
+    display: flex; align-items: center; justify-content: center; z-index: 100;
+  }
+  .modal {
+    background: white; border-radius: var(--radius); padding: 16px;
+    min-width: 320px; max-width: 480px; box-shadow: 0 6px 30px rgba(0,0,0,0.2);
+  }
+  .modal h3 { margin: 0 0 12px; }
+  .modal ul { list-style: none; padding: 0; margin: 0 0 12px; max-height: 240px; overflow-y: auto; }
+  .modal li {
+    padding: 8px 10px; border: 1px solid var(--border); border-radius: 4px;
+    margin-bottom: 4px; cursor: pointer;
+  }
+  .modal li:hover { background: #f0f4ff; border-color: var(--accent); }
+  .modal li.selected { background: var(--accent); color: white; border-color: var(--accent); }
+  .modal li.empty { font-style: italic; color: var(--muted); cursor: default; }
+  .modal li.empty:hover { background: transparent; border-color: var(--border); }
+  .modal-actions { display: flex; justify-content: flex-end; gap: 8px; }
+
+  .toast {
+    position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
+    background: #333; color: white; padding: 8px 16px; border-radius: 4px;
+    z-index: 200; font-size: 13px; opacity: 0; transition: opacity 0.2s;
+  }
+  .toast.show { opacity: 1; }
+</style>
+</head>
+<body>
+
+<!-- =================  MAIN VIEW  ================= -->
+<div id="main-view">
+
+  <div class="panel" id="last-filters">
+    <h3>Последние использованные фильтры</h3>
+    <div id="last-filters-list"><span class="filter-empty">Пока нет сохранённых фильтров</span></div>
+  </div>
+
+  <div id="controls">
+    <div class="ctl date-cell">
+      <span class="ctl-label">Дата</span>
+      <span id="date-display"></span>
+      <input type="date" id="date-pick" />
+    </div>
+    <div class="ctl select-cell ctl-btn" id="btn-select-tpl">
+      <span class="ctl-label">Шаблон</span>
+      <strong>Выбрать шаблон</strong>
+      <span id="tpl-selected" class="sub">не выбран</span>
+    </div>
+    <button class="ctl-btn" id="btn-create-tpl">
+      <strong>Создать шаблон</strong>
+      <span class="sub">новый</span>
+    </button>
+    <button class="ctl-btn" id="btn-edit-tpl" disabled>
+      <strong>Редактировать шаблон</strong>
+      <span class="sub">выберите шаблон</span>
+    </button>
+    <button class="ctl-btn" id="btn-export">
+      <strong>Экспорт таблицы</strong>
+      <span class="sub">CSV</span>
+    </button>
+    <button class="ctl-btn" id="btn-print">
+      <strong>Печать PDF</strong>
+      <span class="sub">по шаблону</span>
+    </button>
+  </div>
+
+  <div id="filter-section">
+    <div class="panel" id="filter-header">
+      <div class="row">
+        <label>Партия:
+          <select id="batch-select"><option value="">— все —</option></select>
+        </label>
+        <label>Заказ:
+          <select id="order-select"><option value="">— все —</option></select>
+        </label>
+        <label>Поиск:
+          <input type="text" id="filter-search" placeholder="текст..." />
+        </label>
+        <button class="toolbar-btn" id="apply-filter">Применить</button>
+        <button class="toolbar-btn" id="reset-filter">Сбросить</button>
+      </div>
+    </div>
+    <div class="panel" id="filter-results">
+      <table id="result-table">
+        <thead><tr><th>—</th></tr></thead>
+        <tbody><tr><td><span class="filter-empty">Подключите таблицу в Grist (виджет → Custom → выберите источник данных)</span></td></tr></tbody>
+      </table>
+    </div>
+  </div>
+
+</div>
+
+<!-- =================  EDITOR VIEW  ================= -->
+<div id="editor-view">
+
+  <div id="editor-toolbar">
+
+    <div class="field-block">
+      <label>Конфигурация изделия</label>
+      <div class="field-row">
+        <span class="draggable-source" data-type="config" draggable="true">＋ Конфигурация <span class="badge type-config-badge" id="badge-config">1</span></span>
+        <label style="font-size:11px;color:var(--muted);">кол-во групп:</label>
+        <input type="number" id="count-input" min="1" max="20" value="1" />
+      </div>
+      <div class="field-row" style="margin-top:8px;">
+        <span class="draggable-source" data-type="serial" draggable="true" style="background:#fdecec;border-color:var(--danger);color:var(--danger);">＋ Серийный № <span class="badge" id="badge-serial" style="background:var(--danger)">1</span></span>
+      </div>
+      <div class="field-row" style="margin-top:6px;">
+        <span class="draggable-source" data-type="date" draggable="true" style="background:#e9f6ed;border-color:var(--ok);color:var(--ok);">＋ Дата <span class="badge" id="badge-date" style="background:var(--ok)">1</span></span>
+      </div>
+    </div>
+
+    <div class="field-block">
+      <label>Активная группа</label>
+      <div class="group-tabs" id="group-tabs"></div>
+      <div style="margin-top:10px;">
+        <label>Имя шаблона</label>
+        <input type="text" id="tpl-name" placeholder="например: Бланк ОТК"
+          style="width:100%;padding:4px 6px;border:1px solid var(--border);border-radius:4px;margin-top:4px;" />
+      </div>
+      <div style="margin-top:8px;">
+        <button class="toolbar-btn" id="btn-load-pdf">Загрузить PDF</button>
+        <input type="file" id="pdf-file" accept="application/pdf" hidden />
+      </div>
+    </div>
+
+    <div class="editor-actions">
+      <button class="toolbar-btn" id="btn-back">← Назад</button>
+      <button class="toolbar-btn danger" id="btn-reset">Сбросить</button>
+      <button class="toolbar-btn primary" id="btn-save">Сохранить</button>
+    </div>
+  </div>
+
+  <div id="pdf-area">
+    <div id="pdf-empty">Загрузите PDF — затем перетащите поля поверх документа</div>
+    <div id="pdf-container"></div>
+  </div>
+
+</div>
+
+<div id="toast" class="toast"></div>
+
+<script>
+/* ====================================================================
+   GLOBAL STATE
+   ==================================================================== */
+const STORAGE_KEY = 'widget_report_grist_templates_v1';
+const FILTERS_KEY = 'widget_report_grist_lastfilters_v1';
+
+const state = {
+  view: 'main',                 // 'main' | 'editor'
+  selectedTemplate: null,       // id of chosen template
+  editingTemplate: null,        // template object being edited
+  pdfDoc: null,                 // pdf.js doc
+  pdfBase64: null,
+  placedFields: [],             // {id, type, group, page, x, y}  (x,y in 0..1 of page)
+  activeGroup: 1,
+  groupCount: 1,
+  filterAuthor: 'неизвестный пользователь',
+  tableId: null,
+  records: [],
+  columns: [],
+};
+
+/* PDF.js worker */
+if (window.pdfjsLib) {
+  pdfjsLib.GlobalWorkerOptions.workerSrc =
+    'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+}
+
+/* ====================================================================
+   UTILITY
+   ==================================================================== */
+const $ = (sel) => document.querySelector(sel);
+const $$ = (sel) => document.querySelectorAll(sel);
+
+function toast(msg, ms = 2200) {
+  const t = $('#toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  clearTimeout(toast._t);
+  toast._t = setTimeout(() => t.classList.remove('show'), ms);
+}
+
+function uuid() {
+  return 'id-' + Math.random().toString(36).slice(2, 10);
+}
+
+const RU_MONTHS = ['январь','февраль','март','апрель','май','июнь',
+                   'июль','август','сентябрь','октябрь','ноябрь','декабрь'];
+
+function formatRuDate(d) {
+  return `${RU_MONTHS[d.getMonth()]} ${d.getFullYear()}`;
+}
+
+/* ====================================================================
+   STORAGE
+   ==================================================================== */
+function loadTemplates() {
+  try { return JSON.parse(localStorage.getItem(STORAGE_KEY)) || []; }
+  catch { return []; }
+}
+function saveTemplates(list) {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(list));
+}
+
+function loadLastFilters() {
+  try { return JSON.parse(localStorage.getItem(FILTERS_KEY)) || []; }
+  catch { return []; }
+}
+function pushLastFilter(filter) {
+  const list = loadLastFilters();
+  list.unshift({ ...filter, ts: Date.now() });
+  if (list.length > 8) list.length = 8;
+  localStorage.setItem(FILTERS_KEY, JSON.stringify(list));
+  renderLastFilters();
+}
+
+/* ====================================================================
+   VIEW SWITCHING
+   ==================================================================== */
+function showMain() {
+  state.view = 'main';
+  $('#main-view').style.display = 'grid';
+  $('#editor-view').classList.remove('show');
+  renderLastFilters();
+  renderTemplateButtons();
+}
+function showEditor(existingTplId = null) {
+  state.view = 'editor';
+  $('#main-view').style.display = 'none';
+  $('#editor-view').classList.add('show');
+
+  if (existingTplId) {
+    const tpl = loadTemplates().find(t => t.id === existingTplId);
+    if (tpl) {
+      state.editingTemplate = { ...tpl };
+      state.placedFields = [...tpl.fields];
+      state.groupCount = tpl.groupCount;
+      state.pdfBase64 = tpl.pdfBase64;
+      $('#tpl-name').value = tpl.name;
+      $('#count-input').value = tpl.groupCount;
+    }
+  } else {
+    state.editingTemplate = { id: uuid(), name: '', fields: [], pdfBase64: null, groupCount: 1 };
+    state.placedFields = [];
+    state.groupCount = 1;
+    state.pdfBase64 = null;
+    $('#tpl-name').value = '';
+    $('#count-input').value = 1;
+  }
+
+  state.activeGroup = 1;
+  renderGroupTabs();
+  updateBadges();
+
+  if (state.pdfBase64) {
+    renderPdfFromBase64(state.pdfBase64);
+  } else {
+    $('#pdf-container').innerHTML = '';
+    $('#pdf-empty').style.display = 'flex';
+  }
+}
+
+/* ====================================================================
+   MAIN VIEW — DATE
+   ==================================================================== */
+function initDate() {
+  const today = new Date();
+  $('#date-display').textContent = formatRuDate(today);
+  $('#date-pick').value = today.toISOString().slice(0,10);
+  $('#date-pick').addEventListener('change', e => {
+    const d = new Date(e.target.value);
+    if (!isNaN(d)) $('#date-display').textContent = formatRuDate(d);
+  });
+}
+
+/* ====================================================================
+   MAIN VIEW — TEMPLATE PICKER MODAL
+   ==================================================================== */
+function openTemplatePicker() {
+  const templates = loadTemplates();
+  let selected = state.selectedTemplate;
+
+  const back = document.createElement('div');
+  back.className = 'modal-back';
+  back.innerHTML = `
+    <div class="modal">
+      <h3>Выбрать шаблон</h3>
+      <ul id="tpl-list">
+        ${templates.length === 0
+          ? '<li class="empty">Шаблонов пока нет — создайте первый</li>'
+          : templates.map(t => `<li data-id="${t.id}" ${t.id===selected?'class="selected"':''}>${escapeHtml(t.name||'(без имени)')}</li>`).join('')}
+      </ul>
+      <div class="modal-actions">
+        <button class="toolbar-btn" data-act="cancel">Отмена</button>
+        <button class="toolbar-btn primary" data-act="ok">OK</button>
+      </div>
+    </div>`;
+  document.body.appendChild(back);
+
+  back.querySelectorAll('#tpl-list li[data-id]').forEach(li => {
+    li.addEventListener('click', () => {
+      back.querySelectorAll('#tpl-list li').forEach(x => x.classList.remove('selected'));
+      li.classList.add('selected');
+      selected = li.dataset.id;
+    });
+  });
+  back.querySelector('[data-act=cancel]').onclick = () => back.remove();
+  back.querySelector('[data-act=ok]').onclick = () => {
+    state.selectedTemplate = selected || null;
+    renderTemplateButtons();
+    back.remove();
+  };
+  back.addEventListener('click', e => { if (e.target === back) back.remove(); });
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+function renderTemplateButtons() {
+  const templates = loadTemplates();
+  const tpl = templates.find(t => t.id === state.selectedTemplate);
+  $('#tpl-selected').textContent = tpl ? tpl.name : 'не выбран';
+  $('#btn-edit-tpl').disabled = !tpl;
+  $('#btn-edit-tpl').querySelector('.sub').textContent = tpl ? 'изменить ' + tpl.name : 'выберите шаблон';
+}
+
+/* ====================================================================
+   MAIN VIEW — LAST FILTERS
+   ==================================================================== */
+function renderLastFilters() {
+  const list = loadLastFilters();
+  const c = $('#last-filters-list');
+  if (list.length === 0) {
+    c.innerHTML = '<span class="filter-empty">Пока нет сохранённых фильтров</span>';
+    return;
+  }
+  c.innerHTML = list.map(f => `
+    <div class="filter-chip">
+      <span>${escapeHtml(f.label)}</span>
+      <span class="author">— ${escapeHtml(f.author || 'неизв.')}</span>
+    </div>`).join('');
+}
+
+/* ====================================================================
+   MAIN VIEW — FILTER & RESULTS  (Grist integration)
+   ==================================================================== */
+function setRecords(records) {
+  state.records = records || [];
+  if (records && records.length) {
+    state.columns = Object.keys(records[0]).filter(k => k !== 'id');
+  }
+  renderResultTable(state.records);
+  populateFilterDropdowns(state.records);
+}
+
+function populateFilterDropdowns(records) {
+  const batchSel = $('#batch-select');
+  const orderSel = $('#order-select');
+  const batchCol = guessColumn(records, ['partiya','партия','batch','party']);
+  const orderCol = guessColumn(records, ['order','заказ','zakaz','order_no']);
+
+  batchSel.innerHTML = '<option value="">— все —</option>';
+  orderSel.innerHTML = '<option value="">— все —</option>';
+  if (batchCol) [...new Set(records.map(r => r[batchCol]).filter(Boolean))].forEach(v =>
+    batchSel.insertAdjacentHTML('beforeend', `<option>${escapeHtml(v)}</option>`));
+  if (orderCol) [...new Set(records.map(r => r[orderCol]).filter(Boolean))].forEach(v =>
+    orderSel.insertAdjacentHTML('beforeend', `<option>${escapeHtml(v)}</option>`));
+  batchSel.dataset.col = batchCol || '';
+  orderSel.dataset.col = orderCol || '';
+}
+
+function guessColumn(records, candidates) {
+  if (!records.length) return null;
+  const keys = Object.keys(records[0]).map(k => [k, k.toLowerCase()]);
+  for (const c of candidates) {
+    const f = keys.find(([_, l]) => l.includes(c));
+    if (f) return f[0];
+  }
+  return null;
+}
+
+function renderResultTable(records) {
+  const t = $('#result-table');
+  if (!records || !records.length) {
+    t.querySelector('thead').innerHTML = '<tr><th>—</th></tr>';
+    t.querySelector('tbody').innerHTML = '<tr><td><span class="filter-empty">Нет данных</span></td></tr>';
+    return;
+  }
+  const cols = state.columns;
+  t.querySelector('thead').innerHTML = '<tr>' + cols.map(c => `<th>${escapeHtml(c)}</th>`).join('') + '</tr>';
+  t.querySelector('tbody').innerHTML = records.slice(0, 500).map(r =>
+    '<tr>' + cols.map(c => `<td>${escapeHtml(r[c] ?? '')}</td>`).join('') + '</tr>'
+  ).join('');
+}
+
+function applyFilter() {
+  const batchVal = $('#batch-select').value;
+  const orderVal = $('#order-select').value;
+  const searchVal = $('#filter-search').value.trim().toLowerCase();
+  const batchCol = $('#batch-select').dataset.col;
+  const orderCol = $('#order-select').dataset.col;
+
+  let recs = state.records;
+  if (batchVal && batchCol) recs = recs.filter(r => String(r[batchCol]) === batchVal);
+  if (orderVal && orderCol) recs = recs.filter(r => String(r[orderCol]) === orderVal);
+  if (searchVal) recs = recs.filter(r =>
+    Object.values(r).some(v => String(v ?? '').toLowerCase().includes(searchVal))
+  );
+  renderResultTable(recs);
+
+  // remember filter
+  const parts = [];
+  if (batchVal) parts.push(`партия: ${batchVal}`);
+  if (orderVal) parts.push(`заказ: ${orderVal}`);
+  if (searchVal) parts.push(`поиск: ${searchVal}`);
+  if (parts.length) pushLastFilter({ label: parts.join(', '), author: state.filterAuthor });
+}
+
+function resetFilter() {
+  $('#batch-select').value = '';
+  $('#order-select').value = '';
+  $('#filter-search').value = '';
+  renderResultTable(state.records);
+}
+
+/* ====================================================================
+   MAIN VIEW — EXPORT CSV
+   ==================================================================== */
+function exportCsv() {
+  const t = $('#result-table');
+  const rows = [...t.querySelectorAll('tr')].map(tr =>
+    [...tr.children].map(c => `"${(c.textContent||'').replace(/"/g,'""')}"`).join(',')
+  );
+  const csv = '\ufeff' + rows.join('\r\n');
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `report_${new Date().toISOString().slice(0,10)}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+  toast('Таблица экспортирована');
+}
+
+/* ====================================================================
+   MAIN VIEW — PRINT PDF (apply template)
+   ==================================================================== */
+async function printPdf() {
+  const tpl = loadTemplates().find(t => t.id === state.selectedTemplate);
+  if (!tpl) { toast('Сначала выберите шаблон'); return; }
+  if (!tpl.pdfBase64) { toast('У шаблона нет PDF'); return; }
+
+  // also persist the filter that was used
+  pushLastFilter({
+    label: `печать (${tpl.name})`,
+    author: state.filterAuthor,
+  });
+
+  // For now: open a print-preview window with PDF + overlaid field labels.
+  // Real "burn-in" of values onto PDF would need pdf-lib (extension point).
+  const w = window.open('', '_blank');
+  if (!w) { toast('Браузер заблокировал окно'); return; }
+  w.document.write(`
+    <html><head><title>Печать — ${escapeHtml(tpl.name)}</title>
+    <style>body{margin:0;font-family:sans-serif;}iframe{width:100vw;height:100vh;border:0;}</style>
+    </head><body>
+    <iframe src="data:application/pdf;base64,${tpl.pdfBase64}"></iframe>
+    </body></html>`);
+  w.document.close();
+  toast('PDF открыт для печати');
+}
+
+/* ====================================================================
+   EDITOR — GROUP COUNT & TABS
+   ==================================================================== */
+function renderGroupTabs() {
+  const c = $('#group-tabs');
+  c.innerHTML = '';
+  for (let i = 1; i <= state.groupCount; i++) {
+    const tab = document.createElement('div');
+    tab.className = 'group-tab' + (i === state.activeGroup ? ' active' : '');
+    tab.textContent = `Группа ${i}`;
+    tab.onclick = () => { state.activeGroup = i; renderGroupTabs(); };
+    c.appendChild(tab);
+  }
+}
+function updateBadges() {
+  ['config','serial','date'].forEach(t => {
+    const el = document.getElementById(`badge-${t}`);
+    if (el) el.textContent = state.activeGroup;
+  });
+}
+
+/* ====================================================================
+   EDITOR — PDF LOAD & RENDER
+   ==================================================================== */
+async function loadPdfFile(file) {
+  const buf = await file.arrayBuffer();
+  const b64 = btoa(String.fromCharCode(...new Uint8Array(buf)));
+  state.pdfBase64 = b64;
+  await renderPdfFromBase64(b64);
+  toast('PDF загружен');
+}
+
+async function renderPdfFromBase64(b64) {
+  $('#pdf-empty').style.display = 'none';
+  const bytes = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
+  const doc = await pdfjsLib.getDocument({ data: bytes }).promise;
+  state.pdfDoc = doc;
+  const container = $('#pdf-container');
+  container.innerHTML = '';
+  for (let p = 1; p <= doc.numPages; p++) {
+    const page = await doc.getPage(p);
+    const viewport = page.getViewport({ scale: 1.4 });
+    const wrap = document.createElement('div');
+    wrap.className = 'pdf-page-wrap';
+    wrap.style.width = viewport.width + 'px';
+    wrap.style.height = viewport.height + 'px';
+    wrap.dataset.page = p;
+
+    const canvas = document.createElement('canvas');
+    canvas.width = viewport.width;
+    canvas.height = viewport.height;
+    wrap.appendChild(canvas);
+
+    const overlay = document.createElement('div');
+    overlay.className = 'drop-overlay';
+    overlay.dataset.page = p;
+    wrap.appendChild(overlay);
+    bindDropTarget(overlay, p);
+
+    container.appendChild(wrap);
+    await page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
+  }
+  redrawPlacedFields();
+}
+
+/* ====================================================================
+   EDITOR — DRAG & DROP placement
+   ==================================================================== */
+document.addEventListener('dragstart', e => {
+  const src = e.target.closest('.draggable-source');
+  if (!src) return;
+  e.dataTransfer.setData('text/plain', JSON.stringify({
+    type: src.dataset.type, group: state.activeGroup, new: true
+  }));
+});
+
+function bindDropTarget(overlay, pageNum) {
+  overlay.addEventListener('dragover', e => e.preventDefault());
+  overlay.addEventListener('drop', e => {
+    e.preventDefault();
+    let data;
+    try { data = JSON.parse(e.dataTransfer.getData('text/plain')); } catch { return; }
+    const rect = overlay.getBoundingClientRect();
+    const x = (e.clientX - rect.left) / rect.width;
+    const y = (e.clientY - rect.top) / rect.height;
+
+    if (data.new) {
+      state.placedFields.push({ id: uuid(), type: data.type, group: data.group, page: pageNum, x, y });
+    } else {
+      const f = state.placedFields.find(f => f.id === data.id);
+      if (f) { f.page = pageNum; f.x = x; f.y = y; }
+    }
+    redrawPlacedFields();
+  });
+}
+
+function redrawPlacedFields() {
+  $$('.placed-field').forEach(el => el.remove());
+  state.placedFields.forEach(f => {
+    const wrap = document.querySelector(`.pdf-page-wrap[data-page="${f.page}"]`);
+    if (!wrap) return;
+    const el = document.createElement('div');
+    el.className = `placed-field type-${f.type}`;
+    el.draggable = true;
+    el.dataset.id = f.id;
+    const labels = { config: 'Конфиг.', serial: 'Сер.№', date: 'Дата' };
+    el.innerHTML = `<span>G${f.group}: ${labels[f.type]}</span><span class="x" data-act="del">✕</span>`;
+    el.style.left = (f.x * wrap.clientWidth) + 'px';
+    el.style.top  = (f.y * wrap.clientHeight) + 'px';
+
+    el.addEventListener('dragstart', e => {
+      e.dataTransfer.setData('text/plain', JSON.stringify({ id: f.id, new: false }));
+    });
+    el.querySelector('[data-act=del]').addEventListener('click', ev => {
+      ev.stopPropagation();
+      state.placedFields = state.placedFields.filter(x => x.id !== f.id);
+      redrawPlacedFields();
+    });
+    wrap.appendChild(el);
+  });
+}
+
+/* ====================================================================
+   EDITOR — SAVE / RESET
+   ==================================================================== */
+function saveTemplate() {
+  const name = $('#tpl-name').value.trim();
+  if (!name) { toast('Введите имя шаблона'); return; }
+  if (!state.pdfBase64) { toast('Загрузите PDF'); return; }
+  if (state.placedFields.length === 0) {
+    if (!confirm('Шаблон без полей — сохранить?')) return;
+  }
+
+  const templates = loadTemplates();
+  const tpl = {
+    id: state.editingTemplate.id,
+    name,
+    groupCount: state.groupCount,
+    fields: state.placedFields,
+    pdfBase64: state.pdfBase64,
+    updatedAt: Date.now(),
+  };
+  const idx = templates.findIndex(t => t.id === tpl.id);
+  if (idx >= 0) templates[idx] = tpl; else templates.push(tpl);
+  saveTemplates(templates);
+  state.selectedTemplate = tpl.id;
+  toast('Шаблон сохранён');
+  showMain();
+}
+
+function resetTemplate() {
+  if (!confirm('Сбросить все размещённые поля?')) return;
+  state.placedFields = [];
+  redrawPlacedFields();
+}
+
+/* ====================================================================
+   EVENT BINDING
+   ==================================================================== */
+function bindEvents() {
+  $('#btn-select-tpl').addEventListener('click', openTemplatePicker);
+  $('#btn-create-tpl').addEventListener('click', () => showEditor(null));
+  $('#btn-edit-tpl').addEventListener('click', () => {
+    if (state.selectedTemplate) showEditor(state.selectedTemplate);
+  });
+  $('#btn-export').addEventListener('click', exportCsv);
+  $('#btn-print').addEventListener('click', printPdf);
+
+  $('#apply-filter').addEventListener('click', applyFilter);
+  $('#reset-filter').addEventListener('click', resetFilter);
+
+  $('#btn-back').addEventListener('click', showMain);
+  $('#btn-reset').addEventListener('click', resetTemplate);
+  $('#btn-save').addEventListener('click', saveTemplate);
+  $('#btn-load-pdf').addEventListener('click', () => $('#pdf-file').click());
+  $('#pdf-file').addEventListener('change', e => {
+    if (e.target.files[0]) loadPdfFile(e.target.files[0]);
+  });
+  $('#count-input').addEventListener('change', e => {
+    const n = Math.max(1, Math.min(20, parseInt(e.target.value) || 1));
+    state.groupCount = n;
+    if (state.activeGroup > n) state.activeGroup = n;
+    // drop fields belonging to removed groups
+    state.placedFields = state.placedFields.filter(f => f.group <= n);
+    renderGroupTabs();
+    updateBadges();
+    redrawPlacedFields();
+  });
+}
+
+/* ====================================================================
+   GRIST INTEGRATION
+   ==================================================================== */
+function initGrist() {
+  if (!window.grist) return;
+  grist.ready({ requiredAccess: 'read table' });
+
+  grist.onRecords((records) => {
+    setRecords(records);
+  });
+
+  // try to capture author / user info if available
+  if (grist.docApi && grist.docApi.getAccessToken) {
+    // no-op placeholder, real user info comes via grist.api
+  }
+  if (grist.getOption) {
+    // optional: load saved settings
+  }
+}
+
+/* ====================================================================
+   BOOT
+   ==================================================================== */
+document.addEventListener('DOMContentLoaded', () => {
+  initDate();
+  bindEvents();
+  renderLastFilters();
+  renderTemplateButtons();
+  initGrist();
+});
+</script>
+</body>
+</html>
