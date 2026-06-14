@@ -225,6 +225,13 @@
     z-index: 200; font-size: 13px; opacity: 0; transition: opacity 0.2s;
   }
   .toast.show { opacity: 1; }
+
+  #version-badge {
+    position: fixed; right: 8px; bottom: 6px;
+    font-size: 11px; color: var(--muted); font-family: ui-monospace, Menlo, monospace;
+    background: rgba(255,255,255,0.7); padding: 1px 6px; border-radius: 3px;
+    pointer-events: none; z-index: 50;
+  }
 </style>
 </head>
 <body>
@@ -260,9 +267,9 @@
       <strong>Экспорт таблицы</strong>
       <span class="sub">CSV</span>
     </button>
-    <button class="ctl-btn" id="btn-print">
+    <button class="ctl-btn" id="btn-print" disabled>
       <strong>Печать PDF</strong>
-      <span class="sub">по шаблону</span>
+      <span class="sub">выберите шаблон</span>
     </button>
   </div>
 
@@ -341,11 +348,14 @@
 </div>
 
 <div id="toast" class="toast"></div>
+<div id="version-badge"></div>
 
 <script>
 /* ====================================================================
    GLOBAL STATE
    ==================================================================== */
+const VERSION = 'v0.2.0';
+const BUILD_DATE = '2026-06-14';
 const STORAGE_KEY = 'widget_report_grist_templates_v1';
 const FILTERS_KEY = 'widget_report_grist_lastfilters_v1';
 
@@ -527,6 +537,8 @@ function renderTemplateButtons() {
   $('#tpl-selected').textContent = tpl ? tpl.name : 'не выбран';
   $('#btn-edit-tpl').disabled = !tpl;
   $('#btn-edit-tpl').querySelector('.sub').textContent = tpl ? 'изменить ' + tpl.name : 'выберите шаблон';
+  $('#btn-print').disabled = !tpl;
+  $('#btn-print').querySelector('.sub').textContent = tpl ? 'по шаблону ' + tpl.name : 'выберите шаблон';
 }
 
 /* ====================================================================
@@ -889,6 +901,9 @@ function initGrist() {
    BOOT
    ==================================================================== */
 document.addEventListener('DOMContentLoaded', () => {
+  document.getElementById('version-badge').textContent = `${VERSION} · ${BUILD_DATE}`;
+  document.title = `Widget Report — Grist (${VERSION})`;
+  console.log(`%cwidget_report_grist ${VERSION} (${BUILD_DATE})`, 'color:#2f6feb;font-weight:bold');
   initDate();
   bindEvents();
   renderLastFilters();
