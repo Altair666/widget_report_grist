@@ -916,12 +916,26 @@ function updateBadges() {
 /* ====================================================================
    EDITOR — PDF LOAD & RENDER
    ==================================================================== */
+function bytesToBase64(bytes) {
+  const chunkSize = 0x8000; // avoid call-stack limits on String.fromCharCode(...)
+  let binary = '';
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunkSize));
+  }
+  return btoa(binary);
+}
+
 async function loadPdfFile(file) {
-  const buf = await file.arrayBuffer();
-  const b64 = btoa(String.fromCharCode(...new Uint8Array(buf)));
-  state.pdfBase64 = b64;
-  await renderPdfFromBase64(b64);
-  toast('PDF загружен');
+  try {
+    const buf = await file.arrayBuffer();
+    const b64 = bytesToBase64(new Uint8Array(buf));
+    state.pdfBase64 = b64;
+    await renderPdfFromBase64(b64);
+    toast('PDF загружен');
+  } catch (e) {
+    console.error('loadPdfFile failed', e);
+    toast('Ошибка загрузки PDF: ' + (e.message || e));
+  }
 }
 
 async function renderPdfFromBase64(b64) {
