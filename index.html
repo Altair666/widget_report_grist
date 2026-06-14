@@ -185,6 +185,7 @@
   }
 
   .drag-row { display: flex; align-items: center; gap: 6px; }
+  .drag-row .draggable-source { flex: 1; align-self: auto; justify-content: space-between; }
   .rotate-btn {
     flex: none; width: 28px; height: 28px;
     border: 1px solid var(--border); border-radius: 4px;
@@ -245,15 +246,18 @@
     position: absolute; inset: 0;
   }
   .placed-field {
-    position: absolute; background: rgba(47, 111, 235, 0.88); color: white;
-    padding: 3.15px 8.4px; border-radius: 4px; font-size: 11.55px; cursor: move;
-    user-select: none; white-space: nowrap;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.25);
+    position: absolute; border-radius: 4px; cursor: move;
+    padding: 6px 10px; font-weight: 500; font-size: 14px;
+    user-select: none; white-space: nowrap; touch-action: none;
+    display: inline-flex; align-items: center; gap: 6px;
+    border: 1px dashed var(--accent); background: #eef3ff; color: var(--accent);
+    box-shadow: 0 1px 3px rgba(0,0,0,0.15);
   }
-  .placed-field.type-config { background: rgba(47, 111, 235, 0.88); }
-  .placed-field.type-serial { background: rgba(217, 70, 70, 0.88); }
-  .placed-field.type-date   { background: rgba(44, 154, 74, 0.88); }
-  .placed-field .x { margin-left: 6px; opacity: 0.7; cursor: pointer; }
+  .placed-field.type-config { border-color: var(--accent); background: #eef3ff; color: var(--accent); }
+  .placed-field.type-serial { border-color: var(--danger); background: #fdecec; color: var(--danger); }
+  .placed-field.type-date   { border-color: var(--ok);     background: #e9f6ed; color: var(--ok); }
+  .placed-field.dragging { opacity: 0.6; z-index: 10; }
+  .placed-field .x { opacity: 0.6; cursor: pointer; }
   .placed-field .x:hover { opacity: 1; }
 
   /* ============== Modal ============== */
@@ -420,7 +424,7 @@
 /* ====================================================================
    GLOBAL STATE
    ==================================================================== */
-const VERSION = 'v0.5.0';
+const VERSION = 'v0.6.0';
 const STORAGE_KEY = 'widget_report_grist_templates_v1';
 const FILTERS_KEY = 'widget_report_grist_lastfilters_v1';
 
@@ -498,12 +502,21 @@ function safeParseJson(s, fallback) {
   try { return JSON.parse(s); } catch { return fallback; }
 }
 
+// Bounds Grist RPC calls so a stuck request (e.g. oversized PdfBase64) can't
+// hang saveTemplate()/refreshTemplates() forever — falls back to localStorage instead.
+function withTimeout(promise, ms = 20000) {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => setTimeout(() => reject(new Error(`Grist RPC timeout after ${ms}ms`)), ms)),
+  ]);
+}
+
 function getTemplates() { return state.templates; }
 
 async function refreshTemplates() {
   if (state.gristFull) {
     try {
-      const data = await grist.docApi.fetchTable('Templates');
+      const data = await withTimeout(grist.docApi.fetchTable('Templates'));
       state.templates = (data.id || []).map((rowId, i) => ({
         _rowId: rowId,
         id: data.ClientId[i] || ('id-' + rowId),
@@ -537,7 +550,7 @@ async function persistTemplate(tpl) {
       const action = tpl._rowId
         ? ['UpdateRecord', 'Templates', tpl._rowId, fields]
         : ['AddRecord', 'Templates', null, fields];
-      const res = await grist.docApi.applyUserActions([action]);
+      const res = await withTimeout(grist.docApi.applyUserActions([action]));
       if (!tpl._rowId && res && res.retValues) tpl._rowId = res.retValues[0];
     } catch (e) {
       console.error('Grist save(Templates) failed, saved locally only', e);
@@ -557,7 +570,7 @@ async function persistTemplate(tpl) {
 async function refreshLastFilters() {
   if (state.gristFull) {
     try {
-      const data = await grist.docApi.fetchTable('LastFilters');
+      const data = await withTimeout(grist.docApi.fetchTable('LastFilters'));
       const list = (data.id || []).map((rowId, i) => ({
         _rowId: rowId,
         label: data.Label[i] || '',
@@ -586,7 +599,7 @@ async function pushLastFilter(filter) {
 
   if (state.gristFull) {
     try {
-      await grist.docApi.applyUserActions([['AddRecord', 'LastFilters', null, {
+      await withTimeout(grist.docApi.applyUserActions([['AddRecord', 'LastFilters', null, {
         Label: entry.label || '',
         Author: entry.author || '',
         BatchValue: entry.batchValue || '',
@@ -594,7 +607,7 @@ async function pushLastFilter(filter) {
         SearchValue: entry.searchValue || '',
         TemplateName: entry.templateName || '',
         AppliedAt: Math.floor(entry.appliedAt / 1000),
-      }]]);
+      }]]));
       return;
     } catch (e) {
       console.error('Grist AddRecord(LastFilters) failed, saved locally only', e);
@@ -1001,8 +1014,11 @@ async function renderPdfFromBase64(b64) {
 document.addEventListener('dragstart', e => {
   const src = e.target.closest('.draggable-source');
   if (!src) return;
+  const rect = src.getBoundingClientRect();
   e.dataTransfer.setData('text/plain', JSON.stringify({
-    type: src.dataset.type, group: state.activeGroup, new: true
+    type: src.dataset.type, group: state.activeGroup, new: true,
+    offX: (e.clientX - rect.left) / rect.width,
+    offY: (e.clientY - rect.top) / rect.height,
   }));
 });
 
@@ -1012,29 +1028,76 @@ function bindDropTarget(overlay, pageNum) {
     e.preventDefault();
     let data;
     try { data = JSON.parse(e.dataTransfer.getData('text/plain')); } catch { return; }
+    if (!data.new) return;
     const rect = overlay.getBoundingClientRect();
     let x = (e.clientX - rect.left) / rect.width;
     let y = (e.clientY - rect.top) / rect.height;
 
-    if (data.new) {
-      state.placedFields.push({ id: uuid(), type: data.type, group: data.group, page: pageNum, x, y, rotated: false });
-    } else {
-      const f = state.placedFields.find(f => f.id === data.id);
-      if (f) {
-        // compensate for where on the badge the user grabbed it, so it doesn't
-        // jump to align its top-left corner with the cursor on drop
-        if (typeof data.offX === 'number') {
-          const el = document.querySelector(`.placed-field[data-id="${f.id}"]`);
-          if (el) {
-            const elRect = el.getBoundingClientRect();
-            x -= (data.offX * elRect.width) / rect.width;
-            y -= (data.offY * elRect.height) / rect.height;
-          }
-        }
-        f.page = pageNum; f.x = x; f.y = y;
+    // compensate for where on the source badge the user grabbed it, so the
+    // new field lands under the cursor at the same relative point, not
+    // anchored by its top-left corner
+    if (typeof data.offX === 'number') {
+      const srcEl = document.querySelector(`.draggable-source[data-type="${data.type}"]`);
+      if (srcEl) {
+        const srcRect = srcEl.getBoundingClientRect();
+        x -= (data.offX * srcRect.width) / rect.width;
+        y -= (data.offY * srcRect.height) / rect.height;
       }
     }
+    x = Math.max(0, Math.min(1, x));
+    y = Math.max(0, Math.min(1, y));
+
+    // only one field of each type per group — re-dropping relocates it
+    const existing = state.placedFields.find(f => f.type === data.type && f.group === data.group);
+    if (existing) {
+      existing.page = pageNum; existing.x = x; existing.y = y;
+    } else {
+      state.placedFields.push({ id: uuid(), type: data.type, group: data.group, page: pageNum, x, y, rotated: false });
+    }
     redrawPlacedFields();
+  });
+}
+
+function bindPlacedFieldDrag(el, f) {
+  el.addEventListener('pointerdown', e => {
+    if (e.button > 0 || e.target.closest('[data-act=del]')) return;
+    e.preventDefault();
+    el.setPointerCapture(e.pointerId);
+    el.classList.add('dragging');
+    const startX = e.clientX, startY = e.clientY;
+    const startLeft = parseFloat(el.style.left) || 0;
+    const startTop = parseFloat(el.style.top) || 0;
+
+    function onMove(ev) {
+      el.style.left = (startLeft + (ev.clientX - startX)) + 'px';
+      el.style.top  = (startTop  + (ev.clientY - startY)) + 'px';
+    }
+    function onUp(ev) {
+      el.releasePointerCapture(ev.pointerId);
+      el.classList.remove('dragging');
+      el.removeEventListener('pointermove', onMove);
+      el.removeEventListener('pointerup', onUp);
+      el.removeEventListener('pointercancel', onUp);
+
+      const elRect = el.getBoundingClientRect();
+      const cx = elRect.left + elRect.width / 2;
+      const cy = elRect.top + elRect.height / 2;
+      el.style.pointerEvents = 'none';
+      const target = document.elementFromPoint(cx, cy);
+      el.style.pointerEvents = '';
+      const overlay = target && target.closest('.drop-overlay');
+      const wrap = (overlay && overlay.closest('.pdf-page-wrap')) || el.closest('.pdf-page-wrap');
+      if (!wrap) { redrawPlacedFields(); return; }
+
+      const wrapRect = wrap.getBoundingClientRect();
+      f.page = parseInt(wrap.dataset.page, 10);
+      f.x = Math.max(0, Math.min(1, (elRect.left - wrapRect.left) / wrapRect.width));
+      f.y = Math.max(0, Math.min(1, (elRect.top  - wrapRect.top)  / wrapRect.height));
+      redrawPlacedFields();
+    }
+    el.addEventListener('pointermove', onMove);
+    el.addEventListener('pointerup', onUp);
+    el.addEventListener('pointercancel', onUp);
   });
 }
 
@@ -1045,7 +1108,6 @@ function redrawPlacedFields() {
     if (!wrap) return;
     const el = document.createElement('div');
     el.className = `placed-field type-${f.type}`;
-    el.draggable = true;
     el.dataset.id = f.id;
     const labels = { config: 'Конфиг.', serial: 'Сер.№', date: 'Дата' };
     el.innerHTML = `<span>G${f.group}: ${labels[f.type]}</span><span class="x" data-act="del">✕</span>`;
@@ -1053,12 +1115,7 @@ function redrawPlacedFields() {
     el.style.top  = (f.y * wrap.clientHeight) + 'px';
     if (f.rotated) el.style.transform = 'rotate(180deg)';
 
-    el.addEventListener('dragstart', e => {
-      const elRect = el.getBoundingClientRect();
-      const offX = (e.clientX - elRect.left) / elRect.width;
-      const offY = (e.clientY - elRect.top) / elRect.height;
-      e.dataTransfer.setData('text/plain', JSON.stringify({ id: f.id, new: false, offX, offY }));
-    });
+    bindPlacedFieldDrag(el, f);
     el.querySelector('[data-act=del]').addEventListener('click', ev => {
       ev.stopPropagation();
       state.placedFields = state.placedFields.filter(x => x.id !== f.id);
