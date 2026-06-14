@@ -10,7 +10,7 @@
 - **Репозиторий:** https://github.com/Altair666/widget_report_grist
 - **Live (GitHub Pages):** https://altair666.github.io/widget_report_grist/
 - **Целевой Grist-документ:** https://lmp-test-dec.getgrist.com/5GtDphApyrjG/LMP-ESKD
-- **Текущая версия:** `v0.3.0`
+- **Текущая версия:** `v0.4.0`
 - **Стек:** один `index.html` (HTML + CSS + vanilla JS), `pdf.js` с CDN, `grist-plugin-api.js` с CDN.
 
 ---
@@ -106,6 +106,17 @@ export GRIST_API_KEY="..."
 - Action-кнопки вертикально: Сохранить (primary) → Сбросить (danger) → Отменить, все с `min-width: 130px`.
 - В бэйдже только версия, без даты.
 
+### v0.4.0 — Grist-таблицы + впечатывание PDF
+- Созданы служебные таблицы `Templates` и `LastFilters` в документе `5GtDphApyrjG` (`lmp-test-dec`) прямым POST к Grist API.
+- `requiredAccess` поднят с `'read table'` до `'full'` — нужен для чтения/записи `Templates`/`LastFilters`.
+- Хранение шаблонов и истории фильтров переведено на Grist (`refreshTemplates`/`persistTemplate`, `refreshLastFilters`/`pushLastFilter`), с фолбэком на `localStorage`, если `grist.docApi` недоступен.
+- `printPdf()` теперь реально «впечатывает» значения в PDF через `pdf-lib` + `@pdf-lib/fontkit` (кириллический шрифт DejaVu Sans с CDN):
+  - поля типа `date` — берут текст из `#date-display` (дата отчёта на главном экране);
+  - поля типа `config`/`serial` — берут значения из текущей строки Grist под курсором (`grist.onRecord` → `state.selectedRecord`), колонки определяются автодетектом (`конфигурац*`/`config`, `серийн*`/`serial`/`s/n`);
+  - результат — сгенерированный PDF открывается в новой вкладке.
+- Группы 2+ при печати пока не получают отдельных значений (нужны доп. таблицы-источники серийных номеров — отдельная задача, см. раздел 6).
+- Имя автора фильтра НЕ менялось — Grist API не отдаёт виджету личность пользователя, остаётся `'неизвестный пользователь'`.
+
 ---
 
 ## 4. Структура файлов
@@ -114,9 +125,7 @@ export GRIST_API_KEY="..."
 widget_report_grist/
 ├── index.html          # весь виджет: HTML + <style> + <script>
 ├── README.md           # описание + инструкция подключения
-├── CONTRIBUTORS.md     # Altair666 + пометка про Claude
-└── scripts/
-    └── create_grist_tables.sh  # bash-скрипт для создания служебных таблиц
+└── CONTRIBUTORS.md     # Altair666 + пометка про Claude
 ```
 
 ### Ключевые константы (`index.html`, верх `<script>`)
@@ -158,17 +167,17 @@ const RU_MONTHS = ['январь','февраль',...,'декабрь'];
 
 | Функция | Что делает |
 |---|---|
-| `loadTemplates()` / `saveTemplates()` | заменить на чтение/запись в Grist таблицу `Templates` |
-| `pushLastFilter()` / `loadLastFilters()` | заменить на работу с таблицей `LastFilters` |
-| `printPdf()` | сейчас просто открывает PDF в новой вкладке — здесь нужно `pdf-lib` для впечатывания значений |
-| `populateFilterDropdowns()` | автодетект колонок — расширить под реальные имена таблицы Grist |
-| `initGrist()` | здесь добавить чтение текущего пользователя и подписки на источник данных |
+| `refreshTemplates()` / `persistTemplate()` | чтение/запись Grist-таблицы `Templates` (фолбэк — `localStorage`, см. `*Local` хелперы) |
+| `refreshLastFilters()` / `pushLastFilter()` | чтение/запись Grist-таблицы `LastFilters` (фолбэк — `localStorage`) |
+| `printPdf()` / `loadCyrillicFontBytes()` | впечатывание значений в PDF через `pdf-lib` + `fontkit`; добавление новых типов полей — здесь |
+| `populateFilterDropdowns()` | автодетект колонок партии/заказа — расширить под реальные имена таблицы Grist |
+| `initGrist()` | `grist.onRecord` → `state.selectedRecord` (источник для `config`/`serial` при печати); чтение текущего пользователя пока не реализовано |
 
 ---
 
-## 5. Служебные таблицы Grist (предполагаемая схема)
+## 5. Служебные таблицы Grist (созданы)
 
-Скрипт `scripts/create_grist_tables.sh` создаёт две таблицы в документе `5GtDphApyrjG` на `lmp-test-dec.getgrist.com`. **На момент handoff ещё не выполнен** — мой sandbox блокировал хост (`x-deny-reason: host_not_allowed`). В Claude Code (с обычным интернетом) запустится без проблем.
+Таблицы `Templates` и `LastFilters` созданы в документе `5GtDphApyrjG` на `lmp-test-dec.getgrist.com` прямым POST `/api/docs/5GtDphApyrjG/tables`. `DateTime`-колонки создались без явной таймзоны (тип `DateTime`, Grist хранит как Unix timestamp в секундах).
 
 ### Templates
 
@@ -179,7 +188,7 @@ const RU_MONTHS = ['январь','февраль',...,'декабрь'];
 | `GroupCount` | Int           | кол-во групп |
 | `Fields`     | Text          | JSON массив размещённых полей |
 | `PdfBase64`  | Text          | PDF в base64 |
-| `UpdatedAt`  | DateTime:UTC  | время изменения |
+| `UpdatedAt`  | DateTime      | время изменения |
 | `UpdatedBy`  | Text          | автор |
 
 ### LastFilters
@@ -192,23 +201,19 @@ const RU_MONTHS = ['январь','февраль',...,'декабрь'];
 | `OrderValue`   | Text          | значение заказа |
 | `SearchValue`  | Text          | строка поиска |
 | `TemplateName` | Text          | имя шаблона (если запись при печати) |
-| `AppliedAt`    | DateTime:UTC  | время применения |
+| `AppliedAt`    | DateTime      | время применения |
 
 ---
 
 ## 6. Открытые задачи (по приоритету)
 
-1. **Создать таблицы** — запустить `bash scripts/create_grist_tables.sh` (нужны Grist API key + сетевой доступ).
-2. **Миграция localStorage → Grist** — переписать `loadTemplates / saveTemplates / pushLastFilter / loadLastFilters` на `grist.docApi.fetchTable('Templates')` и `grist.docApi.applyUserActions([['AddRecord','Templates',null,{...}]])`. Учесть, что `PdfBase64` может быть очень большим — возможно, разбивать на чанки или хранить в attachment-колонке.
-3. **«Впечатывание» значений в PDF при печати** — добавить `pdf-lib`, в `printPdf()`:
-   - открыть PDF из шаблона,
-   - для каждого `placedField`: взять координаты, посчитать в координатах страницы PDF (учесть DPI/units), нарисовать текст значением из выбранной строки Grist;
-   - сохранить, открыть в новой вкладке.
-   Где брать значения для каждой группы — обсудить (выделенная строка? первые N строк отфильтрованной таблицы?).
-4. **Имя текущего пользователя** — через `grist.docApi` или `requiredAccess:'full'` + `grist.api`. Сейчас в `state.filterAuthor = 'неизвестный пользователь'`.
+1. ~~**Создать таблицы**~~ — выполнено (v0.4.0), см. раздел 5.
+2. ~~**Миграция localStorage → Grist**~~ — выполнено (v0.4.0): `refreshTemplates`/`persistTemplate`, `refreshLastFilters`/`pushLastFilter`. `PdfBase64` пока пишется как обычный `Text` без чанкования (см. п.6 — риск остаётся для больших PDF).
+3. ~~**«Впечатывание» значений в PDF при печати**~~ — выполнено (v0.4.0) через `pdf-lib` + `@pdf-lib/fontkit` (DejaVu Sans). `date` ← дата на главном экране; `config`/`serial` ← автодетект колонок в `state.selectedRecord` (строка под курсором в Grist). Группы 2+ значений не получают (см. п.7).
+4. **Имя текущего пользователя** — сознательно не делали: Grist plugin API не отдаёт виджету личность реального пользователя. `state.filterAuthor = 'неизвестный пользователь'` остаётся как есть. Если понадобится — единственный реалистичный путь: запросить имя один раз через `prompt()` и хранить в `localStorage` браузера (per-user/per-browser).
 5. **Привязка к источнику данных Grist** — автодетект колонок «партия/заказ» работает, но имена могут отличаться в реальной таблице LMP-ESKD. Возможно, добавить настройки виджета через `grist.setOptions`.
 6. **Чанкование PDF в Grist** — поле Text в Grist имеет лимит, большие PDF (>1 МБ) могут не сохраниться. Альтернатива — attachment-колонка через `/api/docs/{docId}/attachments`.
-7. **Множественный выбор и групповая печать** — печать всех групп за один PDF (1 страница на группу или несколько групп на одну страницу шаблона).
+7. **Множественный выбор и групповая печать** — печать всех групп за один PDF. Значения для групп 2+ должны браться из отдельных таблиц-источников серийных номеров (по договорённости — отдельная задача, схема таблиц-источников пока не определена).
 
 ---
 
@@ -222,9 +227,6 @@ cd widget_report_grist
 # Локальный запуск (любой статический сервер)
 python3 -m http.server 8000
 # затем в Grist: Add Widget → Custom → URL = http://localhost:8000
-
-# Создать служебные таблицы (сначала export GRIST_API_KEY=...)
-bash scripts/create_grist_tables.sh
 
 # Релизный коммит — бампить VERSION в index.html и тегать
 git commit -am "vX.Y.Z: ..."
@@ -251,6 +253,10 @@ GitHub Pages обновляется автоматически при push в `m
 | 5 | user | дал Grist API key, попросил создать таблицы Templates и LastFilters |
 | 5 | claude | sandbox не пускает на Grist host — создан bash-скрипт в `scripts/create_grist_tables.sh`, его нужно запустить локально |
 | 6 | user | дай лог чата для переноса в Claude Code |
+| 7 | user | (Claude Code) создал таблицы Templates/LastFilters через API, склонировал репо |
+| 7 | claude | v0.4.0 — Grist-таблицы созданы, storage переведён на Grist (с fallback на localStorage), `printPdf()` впечатывает значения через pdf-lib+fontkit. Пункт «имя пользователя» оставлен как есть (API не позволяет). Коммит/push — на стороне пользователя |
+| 8 | user | удалить `scripts/create_grist_tables.sh` из репо, проверить репо на наличие других API-ключей |
+| 8 | claude | скрипт удалён (`git rm`, таблицы уже созданы); ссылки на него убраны из README/HANDOFF; проверка репо — других ключей/секретов не найдено (PAT в HANDOFF уже редактирован) |
 
 ---
 
@@ -258,7 +264,7 @@ GitHub Pages обновляется автоматически при push в `m
 
 ```
 Загрузи репозиторий https://github.com/Altair666/widget_report_grist и прочитай HANDOFF.md.
-Текущая версия v0.3.0. Следующая задача: <выбрать из раздела 6 HANDOFF.md>.
+Текущая версия v0.4.0. Следующая задача: <выбрать из раздела 6 HANDOFF.md>.
 
 Ключи в env: $GH_TOKEN, $GRIST_API_KEY.
 Grist doc: https://lmp-test-dec.getgrist.com/5GtDphApyrjG/LMP-ESKD

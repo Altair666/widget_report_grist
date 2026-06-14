@@ -6,6 +6,8 @@
 <title>Widget Report — Grist</title>
 <script src="https://docs.getgrist.com/grist-plugin-api.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@pdf-lib/fontkit@1.1.1/dist/fontkit.umd.min.js"></script>
 <style>
   :root {
     --bg: #f4f6f8;
@@ -400,7 +402,7 @@
 /* ====================================================================
    GLOBAL STATE
    ==================================================================== */
-const VERSION = 'v0.3.0';
+const VERSION = 'v0.4.0';
 const STORAGE_KEY = 'widget_report_grist_templates_v1';
 const FILTERS_KEY = 'widget_report_grist_lastfilters_v1';
 
@@ -417,6 +419,10 @@ const state = {
   tableId: null,
   records: [],
   columns: [],
+  gristFull: false,             // true if grist.docApi (requiredAccess:'full') is available
+  templates: [],                // cached Templates (Grist table or localStorage)
+  lastFilters: [],              // cached LastFilters (Grist table or localStorage)
+  selectedRecord: null,         // record under cursor in the linked Grist table
 };
 
 /* PDF.js worker */
@@ -451,26 +457,135 @@ function formatRuDate(d) {
 }
 
 /* ====================================================================
-   STORAGE
+   STORAGE — Grist tables `Templates` / `LastFilters`, с фолбэком на
+   localStorage, если виджет запущен не в Grist или без 'full' доступа.
    ==================================================================== */
-function loadTemplates() {
+function loadTemplatesLocal() {
   try { return JSON.parse(localStorage.getItem(STORAGE_KEY)) || []; }
   catch { return []; }
 }
-function saveTemplates(list) {
+function saveTemplatesLocal(list) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(list));
 }
 
-function loadLastFilters() {
+function loadLastFiltersLocal() {
   try { return JSON.parse(localStorage.getItem(FILTERS_KEY)) || []; }
   catch { return []; }
 }
-function pushLastFilter(filter) {
-  const list = loadLastFilters();
-  list.unshift({ ...filter, ts: Date.now() });
-  if (list.length > 8) list.length = 8;
+function saveLastFiltersLocal(list) {
   localStorage.setItem(FILTERS_KEY, JSON.stringify(list));
+}
+
+function safeParseJson(s, fallback) {
+  try { return JSON.parse(s); } catch { return fallback; }
+}
+
+function getTemplates() { return state.templates; }
+
+async function refreshTemplates() {
+  if (state.gristFull) {
+    try {
+      const data = await grist.docApi.fetchTable('Templates');
+      state.templates = (data.id || []).map((rowId, i) => ({
+        _rowId: rowId,
+        id: data.ClientId[i] || ('id-' + rowId),
+        name: data.Name[i] || '',
+        groupCount: data.GroupCount[i] || 1,
+        fields: safeParseJson(data.Fields[i], []),
+        pdfBase64: data.PdfBase64[i] || null,
+        updatedAt: (data.UpdatedAt[i] || 0) * 1000,
+        updatedBy: data.UpdatedBy[i] || '',
+      }));
+      return;
+    } catch (e) {
+      console.error('Grist fetchTable(Templates) failed, falling back to localStorage', e);
+    }
+  }
+  state.templates = loadTemplatesLocal();
+}
+
+async function persistTemplate(tpl) {
+  if (state.gristFull) {
+    try {
+      const fields = {
+        ClientId: tpl.id,
+        Name: tpl.name,
+        GroupCount: tpl.groupCount,
+        Fields: JSON.stringify(tpl.fields),
+        PdfBase64: tpl.pdfBase64 || '',
+        UpdatedAt: Math.floor(tpl.updatedAt / 1000),
+        UpdatedBy: tpl.updatedBy || '',
+      };
+      const action = tpl._rowId
+        ? ['UpdateRecord', 'Templates', tpl._rowId, fields]
+        : ['AddRecord', 'Templates', null, fields];
+      const res = await grist.docApi.applyUserActions([action]);
+      if (!tpl._rowId && res && res.retValues) tpl._rowId = res.retValues[0];
+    } catch (e) {
+      console.error('Grist save(Templates) failed, saved locally only', e);
+      toast('Не удалось сохранить шаблон в Grist — сохранён только локально');
+    }
+  }
+
+  const idx = state.templates.findIndex(t => t.id === tpl.id);
+  if (idx >= 0) state.templates[idx] = tpl; else state.templates.push(tpl);
+
+  const local = loadTemplatesLocal();
+  const lidx = local.findIndex(t => t.id === tpl.id);
+  if (lidx >= 0) local[lidx] = tpl; else local.push(tpl);
+  saveTemplatesLocal(local);
+}
+
+async function refreshLastFilters() {
+  if (state.gristFull) {
+    try {
+      const data = await grist.docApi.fetchTable('LastFilters');
+      const list = (data.id || []).map((rowId, i) => ({
+        _rowId: rowId,
+        label: data.Label[i] || '',
+        author: data.Author[i] || '',
+        batchValue: data.BatchValue[i] || '',
+        orderValue: data.OrderValue[i] || '',
+        searchValue: data.SearchValue[i] || '',
+        templateName: data.TemplateName[i] || '',
+        appliedAt: (data.AppliedAt[i] || 0) * 1000,
+      }));
+      list.sort((a, b) => b.appliedAt - a.appliedAt);
+      state.lastFilters = list.slice(0, 8);
+      return;
+    } catch (e) {
+      console.error('Grist fetchTable(LastFilters) failed, falling back to localStorage', e);
+    }
+  }
+  state.lastFilters = loadLastFiltersLocal();
+}
+
+async function pushLastFilter(filter) {
+  const entry = { ...filter, appliedAt: Date.now() };
+  state.lastFilters.unshift(entry);
+  if (state.lastFilters.length > 8) state.lastFilters.length = 8;
   renderLastFilters();
+
+  if (state.gristFull) {
+    try {
+      await grist.docApi.applyUserActions([['AddRecord', 'LastFilters', null, {
+        Label: entry.label || '',
+        Author: entry.author || '',
+        BatchValue: entry.batchValue || '',
+        OrderValue: entry.orderValue || '',
+        SearchValue: entry.searchValue || '',
+        TemplateName: entry.templateName || '',
+        AppliedAt: Math.floor(entry.appliedAt / 1000),
+      }]]);
+      return;
+    } catch (e) {
+      console.error('Grist AddRecord(LastFilters) failed, saved locally only', e);
+    }
+  }
+  const list = loadLastFiltersLocal();
+  list.unshift(entry);
+  if (list.length > 8) list.length = 8;
+  saveLastFiltersLocal(list);
 }
 
 /* ====================================================================
@@ -489,7 +604,7 @@ function showEditor(existingTplId = null) {
   $('#editor-view').classList.add('show');
 
   if (existingTplId) {
-    const tpl = loadTemplates().find(t => t.id === existingTplId);
+    const tpl = getTemplates().find(t => t.id === existingTplId);
     if (tpl) {
       state.editingTemplate = { ...tpl };
       state.placedFields = [...tpl.fields];
@@ -536,7 +651,7 @@ function initDate() {
    MAIN VIEW — TEMPLATE PICKER MODAL
    ==================================================================== */
 function openTemplatePicker() {
-  const templates = loadTemplates();
+  const templates = getTemplates();
   let selected = state.selectedTemplate;
 
   const back = document.createElement('div');
@@ -577,7 +692,7 @@ function escapeHtml(s) {
 }
 
 function renderTemplateButtons() {
-  const templates = loadTemplates();
+  const templates = getTemplates();
   const tpl = templates.find(t => t.id === state.selectedTemplate);
   $('#tpl-selected').textContent = tpl ? tpl.name : 'не выбран';
   $('#btn-edit-tpl').disabled = !tpl;
@@ -590,7 +705,7 @@ function renderTemplateButtons() {
    MAIN VIEW — LAST FILTERS
    ==================================================================== */
 function renderLastFilters() {
-  const list = loadLastFilters();
+  const list = state.lastFilters;
   const c = $('#last-filters-list');
   if (list.length === 0) {
     c.innerHTML = '<span class="filter-empty">Пока нет сохранённых фильтров</span>';
@@ -675,7 +790,13 @@ function applyFilter() {
   if (batchVal) parts.push(`партия: ${batchVal}`);
   if (orderVal) parts.push(`заказ: ${orderVal}`);
   if (searchVal) parts.push(`поиск: ${searchVal}`);
-  if (parts.length) pushLastFilter({ label: parts.join(', '), author: state.filterAuthor });
+  if (parts.length) pushLastFilter({
+    label: parts.join(', '),
+    author: state.filterAuthor,
+    batchValue: batchVal,
+    orderValue: orderVal,
+    searchValue: searchVal,
+  });
 }
 
 function resetFilter() {
@@ -705,10 +826,19 @@ function exportCsv() {
 }
 
 /* ====================================================================
-   MAIN VIEW — PRINT PDF (apply template)
+   MAIN VIEW — PRINT PDF (apply template, "burn in" values via pdf-lib)
    ==================================================================== */
+let _cyrillicFontBytesPromise = null;
+function loadCyrillicFontBytes() {
+  if (!_cyrillicFontBytesPromise) {
+    _cyrillicFontBytesPromise = fetch('https://cdn.jsdelivr.net/npm/dejavu-fonts-ttf@2.37.3/ttf/DejaVuSans.ttf')
+      .then(r => r.arrayBuffer());
+  }
+  return _cyrillicFontBytesPromise;
+}
+
 async function printPdf() {
-  const tpl = loadTemplates().find(t => t.id === state.selectedTemplate);
+  const tpl = getTemplates().find(t => t.id === state.selectedTemplate);
   if (!tpl) { toast('Сначала выберите шаблон'); return; }
   if (!tpl.pdfBase64) { toast('У шаблона нет PDF'); return; }
 
@@ -716,20 +846,50 @@ async function printPdf() {
   pushLastFilter({
     label: `печать (${tpl.name})`,
     author: state.filterAuthor,
+    templateName: tpl.name,
   });
 
-  // For now: open a print-preview window with PDF + overlaid field labels.
-  // Real "burn-in" of values onto PDF would need pdf-lib (extension point).
-  const w = window.open('', '_blank');
-  if (!w) { toast('Браузер заблокировал окно'); return; }
-  w.document.write(`
-    <html><head><title>Печать — ${escapeHtml(tpl.name)}</title>
-    <style>body{margin:0;font-family:sans-serif;}iframe{width:100vw;height:100vh;border:0;}</style>
-    </head><body>
-    <iframe src="data:application/pdf;base64,${tpl.pdfBase64}"></iframe>
-    </body></html>`);
-  w.document.close();
-  toast('PDF открыт для печати');
+  toast('Формирование PDF…');
+  try {
+    const pdfBytes = Uint8Array.from(atob(tpl.pdfBase64), c => c.charCodeAt(0));
+    const pdfDoc = await PDFLib.PDFDocument.load(pdfBytes);
+    pdfDoc.registerFontkit(fontkit);
+    const font = await pdfDoc.embedFont(await loadCyrillicFontBytes(), { subset: true });
+
+    const pages = pdfDoc.getPages();
+    const record = state.selectedRecord || {};
+    const configCol = guessColumn([record], ['конфигурац', 'config']);
+    const serialCol = guessColumn([record], ['серийн', 'serial', 's/n']);
+    const dateText = $('#date-display').textContent || '';
+
+    for (const f of tpl.fields) {
+      const page = pages[f.page - 1];
+      if (!page) continue;
+      let value = '';
+      if (f.type === 'date') value = dateText;
+      else if (f.type === 'config' && configCol) value = String(record[configCol] ?? '');
+      else if (f.type === 'serial' && serialCol) value = String(record[serialCol] ?? '');
+      if (!value) continue;
+
+      const { width, height } = page.getSize();
+      page.drawText(value, {
+        x: f.x * width,
+        y: height - f.y * height - 10,
+        size: 10,
+        font,
+        color: PDFLib.rgb(0, 0, 0),
+      });
+    }
+
+    const outBytes = await pdfDoc.save();
+    const url = URL.createObjectURL(new Blob([outBytes], { type: 'application/pdf' }));
+    if (!window.open(url, '_blank')) toast('Браузер заблокировал окно');
+    else toast('PDF сформирован');
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+  } catch (e) {
+    console.error('printPdf failed', e);
+    toast('Ошибка формирования PDF: ' + (e.message || e));
+  }
 }
 
 /* ====================================================================
@@ -857,7 +1017,7 @@ function redrawPlacedFields() {
 /* ====================================================================
    EDITOR — SAVE / RESET
    ==================================================================== */
-function saveTemplate() {
+async function saveTemplate() {
   const name = $('#tpl-name').value.trim();
   if (!name) { toast('Введите имя шаблона'); return; }
   if (!state.pdfBase64) { toast('Загрузите PDF'); return; }
@@ -865,18 +1025,18 @@ function saveTemplate() {
     if (!confirm('Шаблон без полей — сохранить?')) return;
   }
 
-  const templates = loadTemplates();
+  const existing = getTemplates().find(t => t.id === state.editingTemplate.id);
   const tpl = {
+    _rowId: existing ? existing._rowId : undefined,
     id: state.editingTemplate.id,
     name,
     groupCount: state.groupCount,
     fields: state.placedFields,
     pdfBase64: state.pdfBase64,
     updatedAt: Date.now(),
+    updatedBy: state.filterAuthor,
   };
-  const idx = templates.findIndex(t => t.id === tpl.id);
-  if (idx >= 0) templates[idx] = tpl; else templates.push(tpl);
-  saveTemplates(templates);
+  await persistTemplate(tpl);
   state.selectedTemplate = tpl.id;
   toast('Шаблон сохранён');
   showMain();
@@ -925,21 +1085,19 @@ function bindEvents() {
 /* ====================================================================
    GRIST INTEGRATION
    ==================================================================== */
-function initGrist() {
-  if (!window.grist) return;
-  grist.ready({ requiredAccess: 'read table' });
+async function initGrist() {
+  if (window.grist) {
+    grist.ready({ requiredAccess: 'full' });
+    state.gristFull = true;
 
-  grist.onRecords((records) => {
-    setRecords(records);
-  });
+    grist.onRecords((records) => setRecords(records));
+    grist.onRecord((record) => { state.selectedRecord = record; });
+  }
 
-  // try to capture author / user info if available
-  if (grist.docApi && grist.docApi.getAccessToken) {
-    // no-op placeholder, real user info comes via grist.api
-  }
-  if (grist.getOption) {
-    // optional: load saved settings
-  }
+  await refreshTemplates();
+  await refreshLastFilters();
+  renderTemplateButtons();
+  renderLastFilters();
 }
 
 /* ====================================================================
@@ -951,8 +1109,6 @@ document.addEventListener('DOMContentLoaded', () => {
   console.log(`%cwidget_report_grist ${VERSION}`, 'color:#2f6feb;font-weight:bold');
   initDate();
   bindEvents();
-  renderLastFilters();
-  renderTemplateButtons();
   initGrist();
 });
 </script>
