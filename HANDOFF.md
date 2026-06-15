@@ -10,7 +10,7 @@
 - **Репозиторий:** https://github.com/Altair666/widget_report_grist
 - **Live (GitHub Pages):** https://altair666.github.io/widget_report_grist/
 - **Целевой Grist-документ:** https://lmp-test-dec.getgrist.com/5GtDphApyrjG/LMP-ESKD
-- **Текущая версия:** `v0.11.0`
+- **Текущая версия:** `v0.12.0`
 - **Стек:** один `index.html` (HTML + CSS + vanilla JS), `pdf.js` с CDN, `grist-plugin-api.js` с CDN.
 
 ---
@@ -164,6 +164,10 @@ export GRIST_API_KEY="..."
 
 ### v0.11.0 — центрирование «впечатанного» текста в рамке поля при печати
 - **`printPdf()`**: значение каждого поля (`config`/`serial`/`date`) теперь центрируется и по горизонтали, и по вертикали внутри «рамки» — прямоугольника той же ширины, что и `.placed-field` в редакторе (`--field-w`, переведена из CSS-px в pt через коэффициент рендера pdf.js `1.4`), высотой `size + 2×3pt`. Отступы сверху/снизу получаются автоматически за счёт центрирования. Якорная точка `drawText` вычисляется через `font.widthOfTextAtSize`/`font.heightAtSize` (ascent/descent), чтобы видимый блок текста, а не базовая линия, оказался в центре рамки; для повёрнутых на 180° полей анкор зеркально отражается относительно центра.
+
+### v0.12.0 — удаление записей из «Последних использованных фильтров»
+- Каждый чип в панели «Последние использованные фильтры» получил крестик `✕` (`renderLastFilters()`, `.filter-chip .x`). Клик вызывает `deleteLastFilter(idx)`: запись убирается из `state.lastFilters` и из DOM немедленно, а если у записи есть `_rowId` (загружена из Grist или только что добавлена) и есть полный доступ — соответствующая строка удаляется из таблицы `LastFilters` через `RemoveRecord`.
+- Попутно исправлено: `pushLastFilter()` теперь сохраняет `_rowId` из `res.retValues[0]` после `AddRecord`, иначе только что добавленную запись было бы нечем `RemoveRecord` без перезагрузки `refreshLastFilters()`.
 
 ---
 

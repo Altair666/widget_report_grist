@@ -61,6 +61,8 @@
     font-size: 12px;
   }
   .filter-chip .author { color: var(--muted); font-size: 11px; }
+  .filter-chip .x { opacity: 0.5; cursor: pointer; }
+  .filter-chip .x:hover { opacity: 1; color: var(--danger); }
   .filter-empty { color: var(--muted); font-style: italic; font-size: 12px; }
 
   /* --- Controls row: date / select / create / edit  +  export / print --- */
@@ -414,7 +416,7 @@
 /* ====================================================================
    GLOBAL STATE
    ==================================================================== */
-const VERSION = 'v0.11.0';
+const VERSION = 'v0.12.0';
 
 const state = {
   view: 'main',                 // 'main' | 'editor'
@@ -566,7 +568,7 @@ async function pushLastFilter(filter) {
 
   if (!state.gristFull) return;
   try {
-    await withTimeout(grist.docApi.applyUserActions([['AddRecord', 'LastFilters', null, {
+    const res = await withTimeout(grist.docApi.applyUserActions([['AddRecord', 'LastFilters', null, {
       Label: entry.label || '',
       Author: entry.author || '',
       BatchValue: entry.batchValue || '',
@@ -575,8 +577,24 @@ async function pushLastFilter(filter) {
       TemplateName: entry.templateName || '',
       AppliedAt: Math.floor(entry.appliedAt / 1000),
     }]]));
+    if (res && res.retValues) entry._rowId = res.retValues[0];
   } catch (e) {
     console.error('Grist AddRecord(LastFilters) failed', e);
+  }
+}
+
+async function deleteLastFilter(idx) {
+  const entry = state.lastFilters[idx];
+  if (!entry) return;
+  state.lastFilters.splice(idx, 1);
+  renderLastFilters();
+
+  if (!state.gristFull || !entry._rowId) return;
+  try {
+    await withTimeout(grist.docApi.applyUserActions([['RemoveRecord', 'LastFilters', entry._rowId]]));
+  } catch (e) {
+    console.error('Grist RemoveRecord(LastFilters) failed', e);
+    toast('Не удалось удалить фильтр в Grist');
   }
 }
 
@@ -706,11 +724,18 @@ function renderLastFilters() {
     c.innerHTML = '<span class="filter-empty">Пока нет сохранённых фильтров</span>';
     return;
   }
-  c.innerHTML = list.map(f => `
-    <div class="filter-chip">
+  c.innerHTML = list.map((f, i) => `
+    <div class="filter-chip" data-idx="${i}">
       <span>${escapeHtml(f.label)}</span>
       <span class="author">— ${escapeHtml(f.author || 'неизв.')}</span>
+      <span class="x" data-act="del-filter" title="Удалить фильтр">✕</span>
     </div>`).join('');
+  c.querySelectorAll('.filter-chip').forEach(chip => {
+    chip.querySelector('[data-act="del-filter"]').addEventListener('click', ev => {
+      ev.stopPropagation();
+      deleteLastFilter(Number(chip.dataset.idx));
+    });
+  });
 }
 
 /* ====================================================================
