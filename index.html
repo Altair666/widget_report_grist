@@ -156,12 +156,14 @@
     display: flex; flex-direction: column; gap: 12px;
     flex: 1; align-items: flex-start;
   }
-  .drag-col { display: grid; grid-template-columns: max-content; gap: 6px; }
+  /* Поворот+бейдж для конфигурации/серийного №/даты — коллинеарны в одну строку */
+  .drag-col { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 
   .draggable-source {
     background: #eef3ff; border: 1px dashed var(--accent); border-radius: 4px;
     padding: 6px 10px; cursor: grab; font-weight: 500; user-select: none;
-    display: inline-flex; align-items: center; gap: 6px;
+    display: inline-flex; align-items: center; justify-content: space-between; gap: 6px;
+    width: var(--field-w, auto);
   }
   .draggable-source:active { cursor: grabbing; }
   .draggable-source.dragging-source {
@@ -173,8 +175,6 @@
     padding: 1px 7px; font-size: 11px;
   }
 
-  .drag-row { display: flex; align-items: center; gap: 6px; }
-  .drag-row .draggable-source { flex: 1; justify-content: space-between; }
   .rotate-btn {
     flex: none; width: 28px; height: 28px;
     border: 1px solid var(--border); border-radius: 4px;
@@ -209,8 +209,7 @@
 
   /* Кнопки действий — горизонтально, над блоком «Имя шаблона» */
   .toolbar-right { display: flex; flex-direction: column; gap: 8px; }
-  .editor-actions { display: flex; gap: 6px; }
-  .editor-actions #btn-save { margin-left: auto; }
+  .editor-actions { display: flex; gap: 6px; justify-content: flex-end; }
   .action-btn { padding: 8px 12px; text-align: center; }
 
   .toolbar-btn {
@@ -365,18 +364,12 @@
       <label>Конфигурация изделия</label>
       <div class="config-inner">
         <div class="drag-col">
-          <div class="drag-row">
-            <button class="rotate-btn" data-type="config" title="Повернуть поля «Конфигурация» активной группы на 180°">↻</button>
-            <span class="draggable-source" data-type="config" draggable="true">Конфигурация <span class="badge" id="badge-config">1</span></span>
-          </div>
-          <div class="drag-row">
-            <button class="rotate-btn" data-type="serial" title="Повернуть поля «Серийный №» активной группы на 180°">↻</button>
-            <span class="draggable-source" data-type="serial" draggable="true" style="background:#fdecec;border-color:var(--danger);color:var(--danger);">Серийный № <span class="badge" id="badge-serial" style="background:var(--danger)">1</span></span>
-          </div>
-          <div class="drag-row">
-            <button class="rotate-btn" data-type="date" title="Повернуть поля «Дата» активной группы на 180°">↻</button>
-            <span class="draggable-source" data-type="date" draggable="true" style="background:#e9f6ed;border-color:var(--ok);color:var(--ok);">Дата <span class="badge" id="badge-date" style="background:var(--ok)">1</span></span>
-          </div>
+          <button class="rotate-btn" data-type="config" title="Повернуть поля «Конфигурация» активной группы на 180°">↻</button>
+          <span class="draggable-source" data-type="config" draggable="true">Конфигурация <span class="badge" id="badge-config">1</span></span>
+          <button class="rotate-btn" data-type="serial" title="Повернуть поля «Серийный №» активной группы на 180°">↻</button>
+          <span class="draggable-source" data-type="serial" draggable="true" style="background:#fdecec;border-color:var(--danger);color:var(--danger);">Серийный № <span class="badge" id="badge-serial" style="background:var(--danger)">1</span></span>
+          <button class="rotate-btn" data-type="date" title="Повернуть поля «Дата» активной группы на 180°">↻</button>
+          <span class="draggable-source" data-type="date" draggable="true" style="background:#e9f6ed;border-color:var(--ok);color:var(--ok);">Дата <span class="badge" id="badge-date" style="background:var(--ok)">1</span></span>
         </div>
         <div class="group-row">
           <label>Активная группа</label>
@@ -418,7 +411,7 @@
 /* ====================================================================
    GLOBAL STATE
    ==================================================================== */
-const VERSION = 'v0.7.0';
+const VERSION = 'v0.8.0';
 const STORAGE_KEY = 'widget_report_grist_templates_v1';
 const FILTERS_KEY = 'widget_report_grist_lastfilters_v1';
 
