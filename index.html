@@ -170,6 +170,9 @@
     background: #eceff1; border-color: var(--border); color: var(--muted);
   }
   .draggable-source.dragging-source .badge { background: var(--muted); }
+  .draggable-source.placed {
+    opacity: 0.45; cursor: not-allowed;
+  }
   .draggable-source .badge {
     background: var(--accent); color: white; border-radius: 10px;
     padding: 1px 7px; font-size: 11px;
@@ -411,7 +414,7 @@
 /* ====================================================================
    GLOBAL STATE
    ==================================================================== */
-const VERSION = 'v0.9.0';
+const VERSION = 'v0.10.0';
 
 const state = {
   view: 'main',                 // 'main' | 'editor'
@@ -615,6 +618,7 @@ function showEditor(existingTplId = null) {
   renderGroupTabs();
   updateBadges();
   updateRotateButtons();
+  updateDragSources();
   updateFieldWidth();
 
   if (state.pdfBase64) {
@@ -898,7 +902,7 @@ function renderGroupTabs() {
     const tab = document.createElement('div');
     tab.className = 'group-tab' + (i === state.activeGroup ? ' active' : '');
     tab.textContent = `Группа ${i}`;
-    tab.onclick = () => { state.activeGroup = i; renderGroupTabs(); updateBadges(); updateRotateButtons(); };
+    tab.onclick = () => { state.activeGroup = i; renderGroupTabs(); updateBadges(); updateRotateButtons(); updateDragSources(); };
     c.appendChild(tab);
   }
 }
@@ -906,6 +910,19 @@ function updateBadges() {
   ['config','serial','date'].forEach(t => {
     const el = document.getElementById(`badge-${t}`);
     if (el) el.textContent = state.activeGroup;
+  });
+}
+
+// Once a field of a given type is placed for the active group, its source
+// badge is greyed out and stops accepting new drags — only the placed
+// field on the PDF (bindPlacedFieldDrag) can be moved.
+function updateDragSources() {
+  ['config','serial','date'].forEach(type => {
+    const src = document.querySelector(`.draggable-source[data-type="${type}"]`);
+    if (!src) return;
+    const placed = state.placedFields.some(f => f.type === type && f.group === state.activeGroup);
+    src.classList.toggle('placed', placed);
+    src.draggable = !placed;
   });
 }
 
@@ -927,6 +944,10 @@ async function loadPdfFile(file) {
     const b64 = bytesToBase64(new Uint8Array(buf));
     state.pdfBase64 = b64;
     await renderPdfFromBase64(b64);
+    const nameInput = $('#tpl-name');
+    if (!nameInput.value.trim()) {
+      nameInput.value = file.name.replace(/\.[^./\\]+$/, '');
+    }
     toast('PDF загружен');
   } catch (e) {
     console.error('loadPdfFile failed', e);
@@ -973,6 +994,7 @@ async function renderPdfFromBase64(b64) {
 document.addEventListener('dragstart', e => {
   const src = e.target.closest('.draggable-source');
   if (!src) return;
+  if (src.classList.contains('placed')) { e.preventDefault(); return; }
   const rect = src.getBoundingClientRect();
   e.dataTransfer.setData('text/plain', JSON.stringify({
     type: src.dataset.type, group: state.activeGroup, new: true,
@@ -1098,6 +1120,7 @@ function redrawPlacedFields() {
     wrap.appendChild(el);
   });
   updateRotateButtons();
+  updateDragSources();
 }
 
 function updateRotateButtons() {
