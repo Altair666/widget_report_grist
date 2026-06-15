@@ -1,0 +1,22 @@
+{
+  "name": "@gristlabs/widget-report",
+  "description": "Генератор под печать этикеток",
+  "homePage": "https://github.com/gristlabs/grist-widget",
+  "version": "0.12.",
+  "grist": {
+    "name": "Report-print Widget",
+    "url": "https://gristlabs.github.io/grist-widget/widget_report_grist/index.html",
+    "widgetId": "@gristlabs/widget_report",
+    "published": true,
+    "accessLevel": "full",
+    "renderAfterReady": true,
+    "description": "Виджет для генерации пакетов этикетов с автоматической подписью",
+    "authors": [
+      {
+        "name": "Altair666",
+        "url": "https://github.com/Altair666"
+      }
+    ],
+    "isGristLabsMaintained": true
+  }
+}
