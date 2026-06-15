@@ -10,7 +10,7 @@
 - **Репозиторий:** https://github.com/Altair666/widget_report_grist
 - **Live (GitHub Pages):** https://altair666.github.io/widget_report_grist/
 - **Целевой Grist-документ:** https://lmp-test-dec.getgrist.com/5GtDphApyrjG/LMP-ESKD
-- **Текущая версия:** `v0.10.0`
+- **Текущая версия:** `v0.11.0`
 - **Стек:** один `index.html` (HTML + CSS + vanilla JS), `pdf.js` с CDN, `grist-plugin-api.js` с CDN.
 
 ---
@@ -161,6 +161,9 @@ export GRIST_API_KEY="..."
 - **Новая функция `updateDragSources()`**: если для активной группы уже размещено поле типа «Конфигурация»/«Серийный №»/«Дата» (`state.placedFields`), соответствующий бейдж-источник (`.draggable-source[data-type=...]`) получает класс `.placed` — становится полупрозрачным (`opacity: 0.45`, `cursor: not-allowed`) и `draggable=false`, повторное перетаскивание из него заблокировано (`dragstart` дополнительно проверяет `.placed` и делает `preventDefault`). Перемещать можно только уже размещённое поле на PDF (`bindPlacedFieldDrag`, как раньше).
 - Вызов `updateDragSources()` добавлен в `showEditor()`, обработчик клика по вкладке группы и `redrawPlacedFields()` — состояние бейджей пересчитывается при открытии редактора, переключении активной группы, размещении/удалении/перемещении/сбросе полей и изменении кол-ва групп.
 - **Диагностика «не сохраняется шаблон в Grist»**: таблицы `Templates`/`LastFilters` в целевом документе (`lmp-test-dec.getgrist.com/5GtDphApyrjG`) проверены через API — обе существуют, колонки и типы (`ClientId`/`Name`/`GroupCount`/`Int`/`Fields`/`PdfBase64`/`UpdatedAt`/`DateTime`/`UpdatedBy` и `Label`/`Author`/`BatchValue`/`OrderValue`/`SearchValue`/`TemplateName`/`AppliedAt`/`DateTime`) полностью совпадают с тем, что пишут/читают `persistTemplate()`/`refreshTemplates()`/`pushLastFilter()`/`refreshLastFilters()`. Схема и код корректны. Наиболее вероятная причина сбоя сохранения — виджету не выдан **full document access** в самой Grist (запрос `requiredAccess:'full'` нужно подтвердить через баннер в настройках виджета); код считает `state.gristFull=true` сразу при наличии `window.grist`, без проверки фактически выданного уровня доступа, поэтому RPC может тихо отваливаться с ошибкой, которая видна только в консоли (`console.error('Grist save(Templates) failed', e)`). Также возможные причины: устаревший `_rowId` у шаблона (если строка была удалена в Grist вручную) или превышение 20-секундного таймаута RPC при большом `PdfBase64`.
+
+### v0.11.0 — центрирование «впечатанного» текста в рамке поля при печати
+- **`printPdf()`**: значение каждого поля (`config`/`serial`/`date`) теперь центрируется и по горизонтали, и по вертикали внутри «рамки» — прямоугольника той же ширины, что и `.placed-field` в редакторе (`--field-w`, переведена из CSS-px в pt через коэффициент рендера pdf.js `1.4`), высотой `size + 2×3pt`. Отступы сверху/снизу получаются автоматически за счёт центрирования. Якорная точка `drawText` вычисляется через `font.widthOfTextAtSize`/`font.heightAtSize` (ascent/descent), чтобы видимый блок текста, а не базовая линия, оказался в центре рамки; для повёрнутых на 180° полей анкор зеркально отражается относительно центра.
 
 ---
 

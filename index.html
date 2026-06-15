@@ -414,7 +414,7 @@
 /* ====================================================================
    GLOBAL STATE
    ==================================================================== */
-const VERSION = 'v0.10.0';
+const VERSION = 'v0.11.0';
 
 const state = {
   view: 'main',                 // 'main' | 'editor'
@@ -868,15 +868,34 @@ async function printPdf() {
 
       const { width, height } = page.getSize();
       const size = 10;
-      let x = f.x * width;
-      let y = height - f.y * height - 10;
+
+      // Frame = the placed-field box as seen in the editor (--field-w, in
+      // CSS px at the pdf.js render scale of 1.4 -> 1px = 1/1.4 pt), with
+      // a few points of vertical padding. Text is centered inside it.
+      const fieldWpx = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--field-w')) || 90;
+      const frameW = fieldWpx / 1.4;
+      const framePadding = 3;
+      const frameH = size + framePadding * 2;
+
+      const leftX = f.x * width;
+      const topY = height - f.y * height;
+      const centerX = leftX + frameW / 2;
+      const centerY = topY - frameH / 2;
+
+      const textWidth = font.widthOfTextAtSize(value, size);
+      const ascent = font.heightAtSize(size, { descender: false });
+      const descent = font.heightAtSize(size) - ascent;
+
       const drawOpts = { size, font, color: PDFLib.rgb(0, 0, 0) };
+      let x, y;
       if (f.rotated) {
-        // rotating around (x,y) flips the text to extend down-left;
-        // shift the anchor so the rotated text covers roughly the same spot
+        // rotating 180° around (x,y) mirrors the text to the other side of the anchor
         drawOpts.rotate = PDFLib.degrees(180);
-        x += font.widthOfTextAtSize(value, size);
-        y += size;
+        x = centerX + textWidth / 2;
+        y = centerY + (ascent - descent) / 2;
+      } else {
+        x = centerX - textWidth / 2;
+        y = centerY - (ascent - descent) / 2;
       }
       page.drawText(value, { x, y, ...drawOpts });
     }
