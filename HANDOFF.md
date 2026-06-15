@@ -10,7 +10,7 @@
 - **Репозиторий:** https://github.com/Altair666/widget_report_grist
 - **Live (GitHub Pages):** https://altair666.github.io/widget_report_grist/
 - **Целевой Grist-документ:** https://lmp-test-dec.getgrist.com/5GtDphApyrjG/LMP-ESKD
-- **Текущая версия:** `v0.8.0`
+- **Текущая версия:** `v0.9.0`
 - **Стек:** один `index.html` (HTML + CSS + vanilla JS), `pdf.js` с CDN, `grist-plugin-api.js` с CDN.
 
 ---
@@ -148,6 +148,13 @@ export GRIST_API_KEY="..."
 - **`.drag-col`** превращён из вертикального стека из 3 строк в одну горизонтальную строку: `[↻ конфиг][Конфигурация][↻ серийный][Серийный №][↻ дата][Дата]` — все 6 элементов коллинеарны.
 - Фиксированная ширина бейджей (`.draggable-source { width: var(--field-w, auto) }`) больше не зависит от трюка `grid-template-columns: max-content` + `flex:1` внутри `.drag-row` (класс `.drag-row` убран) — `--field-w` вычисляется так же, через `updateFieldWidth()` по ширине бейджа «Конфигурация».
 - **Кнопки Отменить/Сбросить/Сохранить** в `.editor-actions` теперь сгруппированы вместе у правого края (`justify-content: flex-end`), без большого зазора перед «Сохранить» — `margin-left: auto` на `#btn-save` убран.
+
+### v0.9.0 — убран фолбэк на localStorage, только Grist-таблицы
+- **Шаблоны и последние фильтры теперь хранятся только в служебных таблицах Grist** (`Templates`, `LastFilters`). Убраны `STORAGE_KEY`/`FILTERS_KEY`, функции `loadTemplatesLocal`/`saveTemplatesLocal`/`loadLastFiltersLocal`/`saveLastFiltersLocal` и все обращения к `localStorage`.
+- `refreshTemplates()`/`refreshLastFilters()`: без `state.gristFull` (или при ошибке RPC) список остаётся пустым/не обновляется; при ошибке RPC — тост с понятной причиной.
+- `persistTemplate()` теперь возвращает `boolean` (успех/неудача). Без full-доступа к Grist или при ошибке RPC — тост «Не удалось сохранить шаблон в Grist» (или «...доступно только при подключении к Grist»), редактор остаётся открытым, `showMain()`/«Шаблон сохранён» не вызываются.
+- `pushLastFilter()`: запись всегда попадает в `state.lastFilters` (в рамках текущей сессии) и сразу отображается; в Grist пишется только при `gristFull`, без localStorage-фолбэка при ошибке.
+- README обновлён: без full document access виджет не сохраняет/не загружает шаблоны и историю фильтров (раньше — фолбэк на localStorage браузера).
 
 ---
 
