@@ -65,13 +65,23 @@
   .filter-chip .x:hover { opacity: 1; color: var(--danger); }
   .filter-empty { color: var(--muted); font-style: italic; font-size: 12px; }
 
-  /* --- Controls row: date / select / create / edit  +  export / print --- */
+  /* --- Controls block: left column (date / template / filters) + right buttons --- */
   #controls {
-    display: grid;
-    grid-template-columns: 2fr 2fr 1fr 1fr;
-    grid-template-rows: 1fr 1fr;
+    display: flex;
     gap: 8px;
-    height: 130px;
+    align-items: stretch;
+  }
+  .controls-left {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .controls-right {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+    width: 248px;
   }
   .ctl {
     background: var(--panel);
@@ -89,26 +99,21 @@
   .ctl-btn:hover:not(:disabled) { background: #f0f4ff; border-color: var(--accent); color: var(--accent); }
   .ctl-btn .sub { font-size: 11px; color: var(--muted); font-weight: 400; }
 
-  .date-cell { grid-row: span 2; }
-  .select-cell { grid-row: span 2; }
-
   #date-display { font-size: 16px; font-weight: 600; }
-  #date-pick { margin-top: 6px; }
+  #date-pick { margin-top: 6px; width: 100%; }
   #tpl-selected { font-size: 13px; color: var(--accent); font-weight: 500; }
 
-  /* --- Bottom area: filter header + filter results --- */
+  /* --- Bottom area: filter results --- */
   #filter-section {
     display: grid;
-    grid-template-rows: auto 1fr;
-    gap: 8px;
+    grid-template-rows: 1fr;
     min-height: 0;
   }
-  #filter-header {
-    padding: 8px 10px;
+  .filter-inline {
+    display: flex; gap: 8px; align-items: center; flex-wrap: wrap;
   }
-  #filter-header .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-  #filter-header label { font-size: 12px; color: var(--muted); }
-  #filter-header select, #filter-header input {
+  .filter-inline label { font-size: 12px; color: var(--muted); display: flex; align-items: center; gap: 4px; }
+  .filter-inline select, .filter-inline input {
     border: 1px solid var(--border); border-radius: 4px; padding: 4px 8px;
   }
   #filter-results { overflow: auto; padding: 0; }
@@ -306,50 +311,46 @@
   </div>
 
   <div id="controls">
-    <div class="ctl date-cell">
-      <span class="ctl-label">Дата</span>
-      <span id="date-display"></span>
-      <input type="date" id="date-pick" />
-    </div>
-    <div class="ctl select-cell ctl-btn" id="btn-select-tpl">
-      <span class="ctl-label">Шаблон</span>
-      <strong>Выбрать шаблон</strong>
-      <span id="tpl-selected" class="sub">не выбран</span>
-    </div>
-    <button class="ctl-btn" id="btn-create-tpl">
-      <strong>Создать шаблон</strong>
-      <span class="sub">новый</span>
-    </button>
-    <button class="ctl-btn" id="btn-edit-tpl" disabled>
-      <strong>Редактировать шаблон</strong>
-      <span class="sub">выберите шаблон</span>
-    </button>
-    <button class="ctl-btn" id="btn-export">
-      <strong>Экспорт таблицы</strong>
-      <span class="sub">CSV</span>
-    </button>
-    <button class="ctl-btn" id="btn-print" disabled>
-      <strong>Печать PDF</strong>
-      <span class="sub">выберите шаблон</span>
-    </button>
-  </div>
-
-  <div id="filter-section">
-    <div class="panel" id="filter-header">
-      <div class="row">
-        <label>Партия:
-          <select id="batch-select"><option value="">— все —</option></select>
-        </label>
-        <label>Заказ:
-          <select id="order-select"><option value="">— все —</option></select>
-        </label>
-        <label>Поиск:
-          <input type="text" id="filter-search" placeholder="текст..." />
-        </label>
+    <div class="controls-left">
+      <div class="ctl date-cell">
+        <span class="ctl-label">Дата</span>
+        <span id="date-display"></span>
+        <input type="date" id="date-pick" />
+      </div>
+      <div class="ctl select-cell ctl-btn" id="btn-select-tpl">
+        <span class="ctl-label">Шаблон</span>
+        <strong>Выбрать шаблон</strong>
+        <span id="tpl-selected" class="sub">не выбран</span>
+      </div>
+      <div class="ctl filter-inline">
+        <label>Партия: <select id="batch-select"><option value="">— все —</option></select></label>
+        <label>Заказ: <select id="order-select"><option value="">— все —</option></select></label>
+        <label>Поиск: <input type="text" id="filter-search" placeholder="текст..." /></label>
         <button class="toolbar-btn" id="apply-filter">Применить</button>
         <button class="toolbar-btn" id="reset-filter">Сбросить</button>
       </div>
     </div>
+    <div class="controls-right">
+      <button class="ctl-btn" id="btn-create-tpl">
+        <strong>Создать шаблон</strong>
+        <span class="sub">новый</span>
+      </button>
+      <button class="ctl-btn" id="btn-edit-tpl" disabled>
+        <strong>Редактировать шаблон</strong>
+        <span class="sub">выберите шаблон</span>
+      </button>
+      <button class="ctl-btn" id="btn-export">
+        <strong>Экспорт таблицы</strong>
+        <span class="sub">CSV</span>
+      </button>
+      <button class="ctl-btn" id="btn-print" disabled>
+        <strong>Печать PDF</strong>
+        <span class="sub">выберите шаблон</span>
+      </button>
+    </div>
+  </div>
+
+  <div id="filter-section">
     <div class="panel" id="filter-results">
       <table id="result-table">
         <thead><tr><th>—</th></tr></thead>
