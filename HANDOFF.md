@@ -10,7 +10,7 @@
 - **Репозиторий:** https://github.com/Altair666/widget_report_grist
 - **Live (GitHub Pages):** https://altair666.github.io/widget_report_grist/
 - **Целевой Grist-документ:** https://lmp-test-dec.getgrist.com/5GtDphApyrjG/LMP-ESKD
-- **Текущая версия:** `v0.12.0`
+- **Текущая версия:** `v0.13.0`
 - **Стек:** один `index.html` (HTML + CSS + vanilla JS), `pdf.js` с CDN, `grist-plugin-api.js` с CDN.
 
 ---
@@ -165,6 +165,13 @@ export GRIST_API_KEY="..."
 ### v0.11.0 — центрирование «впечатанного» текста в рамке поля при печати
 - **`printPdf()`**: значение каждого поля (`config`/`serial`/`date`) теперь центрируется и по горизонтали, и по вертикали внутри «рамки» — прямоугольника той же ширины, что и `.placed-field` в редакторе (`--field-w`, переведена из CSS-px в pt через коэффициент рендера pdf.js `1.4`), высотой `size + 2×3pt`. Отступы сверху/снизу получаются автоматически за счёт центрирования. Якорная точка `drawText` вычисляется через `font.widthOfTextAtSize`/`font.heightAtSize` (ascent/descent), чтобы видимый блок текста, а не базовая линия, оказался в центре рамки; для повёрнутых на 180° полей анкор зеркально отражается относительно центра.
 
+### v0.13.0 — перестройка блока управления главной страницы
+- **`#controls`** переведён с `display: grid` (4 колонки, 2 строки) на `display: flex` из двух частей: `.controls-left` (flex column, `flex:1`) и `.controls-right` (grid 2×2, фиксированная ширина 248px).
+- **Дата** и **«Выбрать шаблон»** теперь расположены вертикально в левой колонке (полная ширина блока каждый, `width: 100%` для `#date-pick`); убраны `grid-row: span 2` у `.date-cell` и `.select-cell`.
+- **Фильтры** (Партия / Заказ / Поиск / Применить / Сбросить) перенесены из отдельной панели `#filter-header` (над `#filter-results`) в левую колонку `#controls` третьим элементом — новый `div.ctl.filter-inline`.
+- `#filter-header` удалён из HTML и CSS; `#filter-section` теперь содержит только `#filter-results` (`grid-template-rows: 1fr`).
+- Кнопки Создать / Редактировать / Экспорт / Печать остались в сетке 2×2 справа (`.controls-right`).
+
 ### v0.12.0 — удаление записей из «Последних использованных фильтров»
 - Каждый чип в панели «Последние использованные фильтры» получил крестик `✕` (`renderLastFilters()`, `.filter-chip .x`). Клик вызывает `deleteLastFilter(idx)`: запись убирается из `state.lastFilters` и из DOM немедленно, а если у записи есть `_rowId` (загружена из Grist или только что добавлена) и есть полный доступ — соответствующая строка удаляется из таблицы `LastFilters` через `RemoveRecord`.
 - Попутно исправлено: `pushLastFilter()` теперь сохраняет `_rowId` из `res.retValues[0]` после `AddRecord`, иначе только что добавленную запись было бы нечем `RemoveRecord` без перезагрузки `refreshLastFilters()`.
@@ -176,6 +183,7 @@ export GRIST_API_KEY="..."
 ```
 widget_report_grist/
 ├── index.html          # весь виджет: HTML + <style> + <script>
+├── package.json        # метаданные Grist-виджета (name, version, grist-манифест)
 ├── README.md           # описание + инструкция подключения
 └── CONTRIBUTORS.md     # Altair666 + пометка про Claude
 ```
@@ -183,11 +191,10 @@ widget_report_grist/
 ### Ключевые константы (`index.html`, верх `<script>`)
 
 ```javascript
-const VERSION       = 'v0.3.0';
-const STORAGE_KEY   = 'widget_report_grist_templates_v1';
-const FILTERS_KEY   = 'widget_report_grist_lastfilters_v1';
+const VERSION   = 'v0.13.0';   // единственная константа версии; дублируется в package.json
 
 const RU_MONTHS = ['январь','февраль',...,'декабрь'];
+// STORAGE_KEY / FILTERS_KEY удалены в v0.9.0 — хранение только в Grist-таблицах
 ```
 
 ### Структуры данных (как хранятся сейчас в localStorage)
