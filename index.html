@@ -31,7 +31,7 @@
   /* =================  MAIN VIEW  ================= */
   #main-view {
     display: grid;
-    grid-template-rows: auto auto 1fr;
+    grid-template-rows: auto auto auto 1fr;
     gap: 10px;
     padding: 10px;
     height: 100%;
@@ -65,23 +65,16 @@
   .filter-chip .x:hover { opacity: 1; color: var(--danger); }
   .filter-empty { color: var(--muted); font-style: italic; font-size: 12px; }
 
-  /* --- Controls block: left column (date / template / filters) + right buttons --- */
-  #controls {
+  /* --- Controls row: date / template / actions, one row, equal height --- */
+  #controls-row {
     display: flex;
     gap: 8px;
     align-items: stretch;
   }
-  .controls-left {
+  #controls-row > .ctl,
+  #controls-row > .ctl-btn {
     flex: 1;
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-  }
-  .controls-right {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 8px;
-    width: 248px;
+    min-width: 0;
   }
   .ctl {
     background: var(--panel);
@@ -103,18 +96,20 @@
   #date-pick { margin-top: 6px; width: 100%; }
   #tpl-selected { font-size: 13px; color: var(--accent); font-weight: 500; }
 
-  /* --- Bottom area: filter results --- */
-  #filter-section {
-    display: grid;
-    grid-template-rows: 1fr;
-    min-height: 0;
-  }
-  .filter-inline {
+  /* --- Filter bar: full width, height synced to #controls-row via JS --- */
+  #filter-bar {
     display: flex; gap: 8px; align-items: center; flex-wrap: wrap;
   }
   .filter-inline label { font-size: 12px; color: var(--muted); display: flex; align-items: center; gap: 4px; }
   .filter-inline select, .filter-inline input {
     border: 1px solid var(--border); border-radius: 4px; padding: 4px 8px;
+  }
+
+  /* --- Bottom area: filter results --- */
+  #filter-section {
+    display: grid;
+    grid-template-rows: 1fr;
+    min-height: 0;
   }
   #filter-results { overflow: auto; padding: 0; }
   #filter-results table { width: 100%; border-collapse: collapse; font-size: 13px; }
@@ -310,44 +305,41 @@
     <div id="last-filters-list"><span class="filter-empty">Пока нет сохранённых фильтров</span></div>
   </div>
 
-  <div id="controls">
-    <div class="controls-left">
-      <div class="ctl date-cell">
-        <span class="ctl-label">Дата</span>
-        <span id="date-display"></span>
-        <input type="date" id="date-pick" />
-      </div>
-      <div class="ctl select-cell ctl-btn" id="btn-select-tpl">
-        <span class="ctl-label">Шаблон</span>
-        <strong>Выбрать шаблон</strong>
-        <span id="tpl-selected" class="sub">не выбран</span>
-      </div>
-      <div class="ctl filter-inline">
-        <label>Партия: <select id="batch-select"><option value="">— все —</option></select></label>
-        <label>Заказ: <select id="order-select"><option value="">— все —</option></select></label>
-        <label>Поиск: <input type="text" id="filter-search" placeholder="текст..." /></label>
-        <button class="toolbar-btn" id="apply-filter">Применить</button>
-        <button class="toolbar-btn" id="reset-filter">Сбросить</button>
-      </div>
+  <div id="controls-row">
+    <div class="ctl date-cell">
+      <span class="ctl-label">Дата</span>
+      <span id="date-display"></span>
+      <input type="date" id="date-pick" />
     </div>
-    <div class="controls-right">
-      <button class="ctl-btn" id="btn-create-tpl">
-        <strong>Создать шаблон</strong>
-        <span class="sub">новый</span>
-      </button>
-      <button class="ctl-btn" id="btn-edit-tpl" disabled>
-        <strong>Редактировать шаблон</strong>
-        <span class="sub">выберите шаблон</span>
-      </button>
-      <button class="ctl-btn" id="btn-export">
-        <strong>Экспорт таблицы</strong>
-        <span class="sub">CSV</span>
-      </button>
-      <button class="ctl-btn" id="btn-print" disabled>
-        <strong>Печать PDF</strong>
-        <span class="sub">выберите шаблон</span>
-      </button>
+    <div class="ctl select-cell ctl-btn" id="btn-select-tpl">
+      <span class="ctl-label">Шаблон</span>
+      <strong>Выбрать шаблон</strong>
+      <span id="tpl-selected" class="sub">не выбран</span>
     </div>
+    <button class="ctl-btn" id="btn-create-tpl">
+      <strong>Создать шаблон</strong>
+      <span class="sub">новый</span>
+    </button>
+    <button class="ctl-btn" id="btn-edit-tpl" disabled>
+      <strong>Редактировать шаблон</strong>
+      <span class="sub">выберите шаблон</span>
+    </button>
+    <button class="ctl-btn" id="btn-export">
+      <strong>Экспорт таблицы</strong>
+      <span class="sub">CSV</span>
+    </button>
+    <button class="ctl-btn" id="btn-print" disabled>
+      <strong>Печать PDF</strong>
+      <span class="sub">выберите шаблон</span>
+    </button>
+  </div>
+
+  <div class="panel filter-inline" id="filter-bar">
+    <label>Партия: <select id="batch-select"><option value="">— все —</option></select></label>
+    <label>Заказ: <select id="order-select"><option value="">— все —</option></select></label>
+    <label>Поиск: <input type="text" id="filter-search" placeholder="текст..." /></label>
+    <button class="toolbar-btn" id="apply-filter">Применить</button>
+    <button class="toolbar-btn" id="reset-filter">Сбросить</button>
   </div>
 
   <div id="filter-section">
@@ -417,7 +409,7 @@
 /* ====================================================================
    GLOBAL STATE
    ==================================================================== */
-const VERSION = 'v0.13.0';
+const VERSION = 'v0.14.0';
 
 const state = {
   view: 'main',                 // 'main' | 'editor'
@@ -659,6 +651,16 @@ function initDate() {
     const d = new Date(e.target.value);
     if (!isNaN(d)) $('#date-display').textContent = formatRuDate(d);
   });
+}
+
+// #filter-bar is a separate grid row from #controls-row, so CSS alone can't
+// equalize their heights — measure the buttons row and apply it as the
+// filter bar's height.
+function syncFilterBarHeight() {
+  const row = $('#controls-row');
+  const bar = $('#filter-bar');
+  if (!row || !bar) return;
+  bar.style.minHeight = row.getBoundingClientRect().height + 'px';
 }
 
 /* ====================================================================
@@ -1283,6 +1285,8 @@ document.addEventListener('DOMContentLoaded', () => {
   initDate();
   bindEvents();
   initGrist();
+  syncFilterBarHeight();
+  window.addEventListener('resize', syncFilterBarHeight);
 });
 </script>
 </body>
