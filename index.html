@@ -409,7 +409,11 @@
 /* ====================================================================
    GLOBAL STATE
    ==================================================================== */
-const VERSION = 'v0.14.0';
+const VERSION = 'v0.15.0';
+
+// Grist table ids (service tables for templates / last-used filters).
+const TABLE_TEMPLATES = 'Report_template';
+const TABLE_LAST_FILTERS = 'Report_last_filter';
 
 const state = {
   view: 'main',                 // 'main' | 'editor'
@@ -462,9 +466,9 @@ function formatRuDate(d) {
 }
 
 /* ====================================================================
-   STORAGE — Grist tables `Templates` / `LastFilters` только. Без full
-   доступа к Grist (requiredAccess:'full') шаблоны/фильтры не сохраняются
-   и не загружаются — localStorage не используется.
+   STORAGE — Grist tables `Report_template` / `Report_last_filter`
+   только. Без full доступа к Grist (requiredAccess:'full') шаблоны/
+   фильтры не сохраняются и не загружаются — localStorage не используется.
    ==================================================================== */
 function safeParseJson(s, fallback) {
   try { return JSON.parse(s); } catch { return fallback; }
@@ -484,7 +488,7 @@ function getTemplates() { return state.templates; }
 async function refreshTemplates() {
   if (!state.gristFull) return;
   try {
-    const data = await withTimeout(grist.docApi.fetchTable('Templates'));
+    const data = await withTimeout(grist.docApi.fetchTable(TABLE_TEMPLATES));
     state.templates = (data.id || []).map((rowId, i) => ({
       _rowId: rowId,
       id: data.ClientId[i] || ('id-' + rowId),
@@ -517,8 +521,8 @@ async function persistTemplate(tpl) {
       UpdatedBy: tpl.updatedBy || '',
     };
     const action = tpl._rowId
-      ? ['UpdateRecord', 'Templates', tpl._rowId, fields]
-      : ['AddRecord', 'Templates', null, fields];
+      ? ['UpdateRecord', TABLE_TEMPLATES, tpl._rowId, fields]
+      : ['AddRecord', TABLE_TEMPLATES, null, fields];
     const res = await withTimeout(grist.docApi.applyUserActions([action]));
     if (!tpl._rowId && res && res.retValues) tpl._rowId = res.retValues[0];
   } catch (e) {
@@ -535,7 +539,7 @@ async function persistTemplate(tpl) {
 async function refreshLastFilters() {
   if (!state.gristFull) return;
   try {
-    const data = await withTimeout(grist.docApi.fetchTable('LastFilters'));
+    const data = await withTimeout(grist.docApi.fetchTable(TABLE_LAST_FILTERS));
     const list = (data.id || []).map((rowId, i) => ({
       _rowId: rowId,
       label: data.Label[i] || '',
@@ -561,7 +565,7 @@ async function pushLastFilter(filter) {
 
   if (!state.gristFull) return;
   try {
-    const res = await withTimeout(grist.docApi.applyUserActions([['AddRecord', 'LastFilters', null, {
+    const res = await withTimeout(grist.docApi.applyUserActions([['AddRecord', TABLE_LAST_FILTERS, null, {
       Label: entry.label || '',
       Author: entry.author || '',
       BatchValue: entry.batchValue || '',
@@ -584,7 +588,7 @@ async function deleteLastFilter(idx) {
 
   if (!state.gristFull || !entry._rowId) return;
   try {
-    await withTimeout(grist.docApi.applyUserActions([['RemoveRecord', 'LastFilters', entry._rowId]]));
+    await withTimeout(grist.docApi.applyUserActions([['RemoveRecord', TABLE_LAST_FILTERS, entry._rowId]]));
   } catch (e) {
     console.error('Grist RemoveRecord(LastFilters) failed', e);
     toast('Не удалось удалить фильтр в Grist');

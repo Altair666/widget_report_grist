@@ -10,7 +10,7 @@
 - **Репозиторий:** https://github.com/Altair666/widget_report_grist
 - **Live (GitHub Pages):** https://altair666.github.io/widget_report_grist/
 - **Целевой Grist-документ:** https://lmp-test-dec.getgrist.com/5GtDphApyrjG/LMP-ESKD
-- **Текущая версия:** `v0.14.0`
+- **Текущая версия:** `v0.15.0`
 - **Стек:** один `index.html` (HTML + CSS + vanilla JS), `pdf.js` с CDN, `grist-plugin-api.js` с CDN.
 
 ---
@@ -165,6 +165,11 @@ export GRIST_API_KEY="..."
 ### v0.11.0 — центрирование «впечатанного» текста в рамке поля при печати
 - **`printPdf()`**: значение каждого поля (`config`/`serial`/`date`) теперь центрируется и по горизонтали, и по вертикали внутри «рамки» — прямоугольника той же ширины, что и `.placed-field` в редакторе (`--field-w`, переведена из CSS-px в pt через коэффициент рендера pdf.js `1.4`), высотой `size + 2×3pt`. Отступы сверху/снизу получаются автоматически за счёт центрирования. Якорная точка `drawText` вычисляется через `font.widthOfTextAtSize`/`font.heightAtSize` (ascent/descent), чтобы видимый блок текста, а не базовая линия, оказался в центре рамки; для повёрнутых на 180° полей анкор зеркально отражается относительно центра.
 
+### v0.15.0 — переименование служебных таблиц Grist
+- В самом Grist-документе таблицы переименованы: `Templates` → `Report_template`, `LastFilters` → `Report_last_filter` (id таблицы, не только отображаемое имя).
+- В коде заведены константы `TABLE_TEMPLATES = 'Report_template'` и `TABLE_LAST_FILTERS = 'Report_last_filter'` (верх `<script>`, рядом с `VERSION`); все вызовы `grist.docApi.fetchTable(...)`/`applyUserActions([...])` в `refreshTemplates`/`persistTemplate`/`refreshLastFilters`/`pushLastFilter`/`deleteLastFilter` переведены на эти константы вместо строковых литералов — следующее переименование таблицы потребует правки в одном месте.
+- Схема колонок (раздел 5) не менялась, изменились только id таблиц.
+
 ### v0.14.0 — блок управления: один ряд кнопок + полноширинная панель фильтров
 - v0.13.0 свела фильтры в левую колонку и разбила кнопки на левую/правую группы — оказалось не тем расположением, что нужно. Откатил на: **один ряд** из 6 равных по высоте элементов (`#controls-row`: Дата, Выбрать шаблон, Создать шаблон, Редактировать шаблон, Экспорт таблицы, Печать PDF), под ним — **отдельная панель фильтров на всю ширину** (`#filter-bar`: Партия/Заказ/Поиск/Применить/Сбросить).
 - `#controls-row` — `display:flex` с `align-items:stretch` (как было раньше), все 6 элементов `flex:1` — одна высота по самому высокому элементу.
@@ -197,7 +202,7 @@ widget_report_grist/
 ### Ключевые константы (`index.html`, верх `<script>`)
 
 ```javascript
-const VERSION   = 'v0.14.0';   // единственная константа версии; дублируется в package.json
+const VERSION   = 'v0.15.0';   // единственная константа версии; дублируется в package.json
 
 const RU_MONTHS = ['январь','февраль',...,'декабрь'];
 // STORAGE_KEY / FILTERS_KEY удалены в v0.9.0 — хранение только в Grist-таблицах
@@ -232,8 +237,8 @@ const RU_MONTHS = ['январь','февраль',...,'декабрь'];
 
 | Функция | Что делает |
 |---|---|
-| `refreshTemplates()` / `persistTemplate()` | чтение/запись Grist-таблицы `Templates` (фолбэк — `localStorage`, см. `*Local` хелперы) |
-| `refreshLastFilters()` / `pushLastFilter()` | чтение/запись Grist-таблицы `LastFilters` (фолбэк — `localStorage`) |
+| `refreshTemplates()` / `persistTemplate()` | чтение/запись Grist-таблицы `Report_template` (id — константа `TABLE_TEMPLATES`) |
+| `refreshLastFilters()` / `pushLastFilter()` | чтение/запись Grist-таблицы `Report_last_filter` (id — константа `TABLE_LAST_FILTERS`) |
 | `printPdf()` / `loadCyrillicFontBytes()` | впечатывание значений в PDF через `pdf-lib` + `fontkit`; добавление новых типов полей — здесь |
 | `populateFilterDropdowns()` | автодетект колонок партии/заказа — расширить под реальные имена таблицы Grist |
 | `initGrist()` | `grist.onRecord` → `state.selectedRecord` (источник для `config`/`serial` при печати); чтение текущего пользователя пока не реализовано |
@@ -242,9 +247,9 @@ const RU_MONTHS = ['январь','февраль',...,'декабрь'];
 
 ## 5. Служебные таблицы Grist (созданы)
 
-Таблицы `Templates` и `LastFilters` созданы в документе `5GtDphApyrjG` на `lmp-test-dec.getgrist.com` прямым POST `/api/docs/5GtDphApyrjG/tables`. `DateTime`-колонки создались без явной таймзоны (тип `DateTime`, Grist хранит как Unix timestamp в секундах).
+Таблицы созданы в документе `5GtDphApyrjG` на `lmp-test-dec.getgrist.com` прямым POST `/api/docs/5GtDphApyrjG/tables`. `DateTime`-колонки создались без явной таймзоны (тип `DateTime`, Grist хранит как Unix timestamp в секундах). С v0.15.0 id таблиц — `Report_template` и `Report_last_filter` (переименованы вручную в Grist, ранее были `Templates`/`LastFilters` — см. константы `TABLE_TEMPLATES`/`TABLE_LAST_FILTERS` в `index.html`).
 
-### Templates
+### Report_template
 
 | Колонка | Тип | Назначение |
 |---|---|---|
@@ -256,7 +261,7 @@ const RU_MONTHS = ['январь','февраль',...,'декабрь'];
 | `UpdatedAt`  | DateTime      | время изменения |
 | `UpdatedBy`  | Text          | автор |
 
-### LastFilters
+### Report_last_filter
 
 | Колонка | Тип | Назначение |
 |---|---|---|
