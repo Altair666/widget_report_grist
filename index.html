@@ -411,7 +411,7 @@
 /* ====================================================================
    GLOBAL STATE
    ==================================================================== */
-const VERSION = 'v0.17.0';
+const VERSION = 'v0.18.0';
 
 // Grist table ids (service tables for templates / last-used filters).
 const TABLE_TEMPLATES = 'Report_template';
@@ -436,10 +436,10 @@ const state = {
   groupCount: 1,
   filterAuthor: 'неизвестный пользователь',
   tableId: null,
+  selectedDate: null,           // Date shown on the main screen; printed into PDF "date" fields bare (no "дата:" prefix)
   gristFull: false,             // true if grist.docApi (requiredAccess:'full') is available
   templates: [],                // cached Templates (Grist table; empty without full access)
   lastFilters: [],              // cached LastFilters (Grist table; session-only without full access)
-  selectedRecord: null,         // record under cursor in the linked Grist table (used by printPdf())
   // Product search catalog (Basic_platforms -> Parts/Modifications/Orders -> Products hub), see refreshCatalog().
   catalog: { basicPlatforms: [], parts: [], modifications: [], orders: [], products: [] },
   productFilter: { basicPlatform: '', part: '', modification: '', order: '', search: '' },
@@ -474,7 +474,7 @@ const RU_MONTHS = ['январь','февраль','март','апрель','м
                    'июль','август','сентябрь','октябрь','ноябрь','декабрь'];
 
 function formatRuDate(d) {
-  return `дата: ${RU_MONTHS[d.getMonth()]} ${d.getFullYear()}`;
+  return `${RU_MONTHS[d.getMonth()]} ${d.getFullYear()}`;
 }
 
 /* ====================================================================
@@ -661,11 +661,15 @@ function showEditor(existingTplId = null) {
    ==================================================================== */
 function initDate() {
   const today = new Date();
-  $('#date-display').textContent = formatRuDate(today);
+  state.selectedDate = today;
+  $('#date-display').textContent = 'дата: ' + formatRuDate(today);
   $('#date-pick').value = today.toISOString().slice(0,10);
   $('#date-pick').addEventListener('change', e => {
     const d = new Date(e.target.value);
-    if (!isNaN(d)) $('#date-display').textContent = formatRuDate(d);
+    if (!isNaN(d)) {
+      state.selectedDate = d;
+      $('#date-display').textContent = 'дата: ' + formatRuDate(d);
+    }
   });
 }
 
@@ -744,17 +748,39 @@ function renderLastFilters() {
     return;
   }
   c.innerHTML = list.map((f, i) => `
-    <div class="filter-chip" data-idx="${i}">
+    <div class="filter-chip" data-idx="${i}" title="Нажмите, чтобы применить этот фильтр" style="cursor:pointer;">
       <span>${escapeHtml(f.label)}</span>
       <span class="author">— ${escapeHtml(f.author || 'неизв.')}</span>
       <span class="x" data-act="del-filter" title="Удалить фильтр">✕</span>
     </div>`).join('');
   c.querySelectorAll('.filter-chip').forEach(chip => {
+    chip.addEventListener('click', () => reapplyLastFilter(Number(chip.dataset.idx)));
     chip.querySelector('[data-act="del-filter"]').addEventListener('click', ev => {
       ev.stopPropagation();
       deleteLastFilter(Number(chip.dataset.idx));
     });
   });
+}
+
+// Restores the 4 cascading selects + search text from a saved "last filter"
+// chip. The filter snapshot rides in Report_last_filter's BatchValue column
+// as JSON (OrderValue/SearchValue keep their original single-value meaning).
+function reapplyLastFilter(idx) {
+  const entry = state.lastFilters[idx];
+  if (!entry) return;
+  let snap = {};
+  try { snap = JSON.parse(entry.batchValue || '{}'); } catch { /* older entry without a snapshot */ }
+  state.productFilter = {
+    basicPlatform: snap.basicPlatform || '',
+    part: snap.part || '',
+    modification: snap.modification || '',
+    order: snap.order || '',
+    search: entry.searchValue || '',
+  };
+  $('#filter-search').value = state.productFilter.search;
+  renderFilterOptions();
+  renderProductResults();
+  toast('Фильтр применён');
 }
 
 /* ====================================================================
@@ -768,16 +794,6 @@ function renderLastFilters() {
    dropdowns cascade by filtering the Products list, not by walking a
    direct table-to-table chain.
    ==================================================================== */
-function guessColumn(records, candidates) {
-  if (!records.length) return null;
-  const keys = Object.keys(records[0]).map(k => [k, k.toLowerCase()]);
-  for (const c of candidates) {
-    const f = keys.find(([_, l]) => l.includes(c));
-    if (f) return f[0];
-  }
-  return null;
-}
-
 async function refreshCatalog() {
   if (!state.gristFull) { renderProductResults(); return; }
   try {
@@ -790,7 +806,7 @@ async function refreshCatalog() {
     ]);
     state.catalog.basicPlatforms = (bp.id || []).map((id, i) => ({ id, name: bp.basic_platform[i] || '' }));
     state.catalog.parts = (parts.id || []).map((id, i) => ({ id, name: parts.f_name[i] || '' }));
-    state.catalog.modifications = (mods.id || []).map((id, i) => ({ id, name: mods.mode_name[i] || '' }));
+    state.catalog.modifications = (mods.id || []).map((id, i) => ({ id, name: mods.mode_name[i] || '', code: mods.mode_code[i] || '' }));
     state.catalog.orders = (orders.id || []).map((id, i) => ({ id, name: orders.name[i] || '' }));
     state.catalog.products = (products.id || []).map((id, i) => ({
       id,
@@ -937,7 +953,12 @@ function applyProductFilter() {
   if (f.order) parts.push(`заказ: ${ordMap.get(f.order)?.name || f.order}`);
   if (f.search) parts.push(`поиск: ${f.search}`);
   if (!parts.length) { toast('Фильтр не задан'); return; }
-  pushLastFilter({ label: parts.join(', '), author: state.filterAuthor });
+  pushLastFilter({
+    label: parts.join(', '),
+    author: state.filterAuthor,
+    batchValue: JSON.stringify({ basicPlatform: f.basicPlatform || null, part: f.part || null, modification: f.modification || null, order: f.order || null }),
+    searchValue: f.search || '',
+  });
   toast('Фильтр сохранён');
 }
 
@@ -980,14 +1001,66 @@ function loadCyrillicFontBytes() {
   return _cyrillicFontBytesPromise;
 }
 
+// Stamps one set of field values onto an already-loaded template PDFDocument
+// (in place). `values` = { date, config, serial } — plain text per field type.
+function stampTemplateFields(doc, font, fields, values) {
+  const pages = doc.getPages();
+  for (const f of fields) {
+    const page = pages[f.page - 1];
+    if (!page) continue;
+    const value = values[f.type];
+    if (!value) continue;
+
+    const { width, height } = page.getSize();
+    const size = 10;
+
+    // Frame = the placed-field box as seen in the editor (--field-w, in
+    // CSS px at the pdf.js render scale of 1.4 -> 1px = 1/1.4 pt), with
+    // a few points of vertical padding. Text is centered inside it.
+    const fieldWpx = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--field-w')) || 90;
+    const frameW = fieldWpx / 1.4;
+    const framePadding = 3;
+    const frameH = size + framePadding * 2;
+
+    const leftX = f.x * width;
+    const topY = height - f.y * height;
+    const centerX = leftX + frameW / 2;
+    const centerY = topY - frameH / 2;
+
+    const textWidth = font.widthOfTextAtSize(value, size);
+    const ascent = font.heightAtSize(size, { descender: false });
+    const descent = font.heightAtSize(size) - ascent;
+
+    const drawOpts = { size, font, color: PDFLib.rgb(0, 0, 0) };
+    let x, y;
+    if (f.rotated) {
+      // rotating 180° around (x,y) mirrors the text to the other side of the anchor
+      drawOpts.rotate = PDFLib.degrees(180);
+      x = centerX + textWidth / 2;
+      y = centerY + (ascent - descent) / 2;
+    } else {
+      x = centerX - textWidth / 2;
+      y = centerY - (ascent - descent) / 2;
+    }
+    page.drawText(value, { x, y, ...drawOpts });
+  }
+}
+
+// Prints the template once per checked row in the results table — "config"
+// gets the modification's mode_code, "serial" gets the product_code, "date"
+// gets the main-screen date — and merges all of them into a single PDF.
 async function printPdf() {
   const tpl = getTemplates().find(t => t.id === state.selectedTemplate);
   if (!tpl) { toast('Сначала выберите шаблон'); return; }
   if (!tpl.pdfBase64) { toast('У шаблона нет PDF'); return; }
 
-  // also persist the filter that was used
+  const selectedProducts = [...state.selectedProductIds]
+    .map(id => state.catalog.products.find(p => p.id === id))
+    .filter(Boolean);
+  if (!selectedProducts.length) { toast('Выберите хотя бы одну строку в таблице результатов'); return; }
+
   pushLastFilter({
-    label: `печать (${tpl.name})`,
+    label: `печать (${tpl.name}) × ${selectedProducts.length}`,
     author: state.filterAuthor,
     templateName: tpl.name,
   });
@@ -995,60 +1068,27 @@ async function printPdf() {
   toast('Формирование PDF…');
   try {
     const pdfBytes = Uint8Array.from(atob(tpl.pdfBase64), c => c.charCodeAt(0));
-    const pdfDoc = await PDFLib.PDFDocument.load(pdfBytes);
-    pdfDoc.registerFontkit(fontkit);
-    const font = await pdfDoc.embedFont(await loadCyrillicFontBytes(), { subset: true });
+    const dateText = formatRuDate(state.selectedDate);
+    const fontBytes = await loadCyrillicFontBytes();
+    const modMap = catalogMap(state.catalog.modifications);
 
-    const pages = pdfDoc.getPages();
-    const record = state.selectedRecord || {};
-    const configCol = guessColumn([record], ['конфигурац', 'config']);
-    const serialCol = guessColumn([record], ['серийн', 'serial', 's/n']);
-    const dateText = $('#date-display').textContent || '';
+    const outDoc = await PDFLib.PDFDocument.create();
 
-    for (const f of tpl.fields) {
-      const page = pages[f.page - 1];
-      if (!page) continue;
-      let value = '';
-      if (f.type === 'date') value = dateText;
-      else if (f.type === 'config' && configCol) value = String(record[configCol] ?? '');
-      else if (f.type === 'serial' && serialCol) value = String(record[serialCol] ?? '');
-      if (!value) continue;
-
-      const { width, height } = page.getSize();
-      const size = 10;
-
-      // Frame = the placed-field box as seen in the editor (--field-w, in
-      // CSS px at the pdf.js render scale of 1.4 -> 1px = 1/1.4 pt), with
-      // a few points of vertical padding. Text is centered inside it.
-      const fieldWpx = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--field-w')) || 90;
-      const frameW = fieldWpx / 1.4;
-      const framePadding = 3;
-      const frameH = size + framePadding * 2;
-
-      const leftX = f.x * width;
-      const topY = height - f.y * height;
-      const centerX = leftX + frameW / 2;
-      const centerY = topY - frameH / 2;
-
-      const textWidth = font.widthOfTextAtSize(value, size);
-      const ascent = font.heightAtSize(size, { descender: false });
-      const descent = font.heightAtSize(size) - ascent;
-
-      const drawOpts = { size, font, color: PDFLib.rgb(0, 0, 0) };
-      let x, y;
-      if (f.rotated) {
-        // rotating 180° around (x,y) mirrors the text to the other side of the anchor
-        drawOpts.rotate = PDFLib.degrees(180);
-        x = centerX + textWidth / 2;
-        y = centerY + (ascent - descent) / 2;
-      } else {
-        x = centerX - textWidth / 2;
-        y = centerY - (ascent - descent) / 2;
-      }
-      page.drawText(value, { x, y, ...drawOpts });
+    for (const product of selectedProducts) {
+      const srcDoc = await PDFLib.PDFDocument.load(pdfBytes);
+      srcDoc.registerFontkit(fontkit);
+      const font = await srcDoc.embedFont(fontBytes, { subset: true });
+      const values = {
+        date: dateText,
+        config: modMap.get(product.modeId)?.code || '',
+        serial: product.productCode || '',
+      };
+      stampTemplateFields(srcDoc, font, tpl.fields, values);
+      const copiedPages = await outDoc.copyPages(srcDoc, srcDoc.getPageIndices());
+      copiedPages.forEach(p => outDoc.addPage(p));
     }
 
-    const outBytes = await pdfDoc.save();
+    const outBytes = await outDoc.save();
     const url = URL.createObjectURL(new Blob([outBytes], { type: 'application/pdf' }));
     if (!window.open(url, '_blank')) toast('Браузер заблокировал окно');
     else toast('PDF сформирован');
@@ -1393,8 +1433,6 @@ async function initGrist() {
   if (window.grist) {
     grist.ready({ requiredAccess: 'full' });
     state.gristFull = true;
-
-    grist.onRecord((record) => { state.selectedRecord = record; });
   }
 
   await refreshTemplates();

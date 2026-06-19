@@ -10,7 +10,7 @@
 - **Репозиторий:** https://github.com/Altair666/widget_report_grist
 - **Live (GitHub Pages):** https://altair666.github.io/widget_report_grist/
 - **Целевой Grist-документ:** `db.mp-lab.ru`, организация `mp-lab`, документ **«LMP данные изделий»** (id `48G8NAEGKuLnpgBo36bWHM`). Уточнено 2026-06-19 через Grist API (read-only) — там же лежат `Report_template`/`Report_last_filter` (см. §5) и каталог изделий `Basic_platforms`/`Parts`/`Modifications`/`Orders`/`Products` (см. §6). Старое указание на `lmp-test-dec.getgrist.com/5GtDphApyrjG` было устаревшим/неверным — не использовать.
-- **Текущая версия:** `v0.17.0`
+- **Текущая версия:** `v0.18.0`
 - **Стек:** один `index.html` (HTML + CSS + vanilla JS), `pdf.js` с CDN, `grist-plugin-api.js` с CDN.
 
 ---
@@ -165,6 +165,16 @@ export GRIST_API_KEY="..."
 ### v0.11.0 — центрирование «впечатанного» текста в рамке поля при печати
 - **`printPdf()`**: значение каждого поля (`config`/`serial`/`date`) теперь центрируется и по горизонтали, и по вертикали внутри «рамки» — прямоугольника той же ширины, что и `.placed-field` в редакторе (`--field-w`, переведена из CSS-px в pt через коэффициент рендера pdf.js `1.4`), высотой `size + 2×3pt`. Отступы сверху/снизу получаются автоматически за счёт центрирования. Якорная точка `drawText` вычисляется через `font.widthOfTextAtSize`/`font.heightAtSize` (ascent/descent), чтобы видимый блок текста, а не базовая линия, оказался в центре рамки; для повёрнутых на 180° полей анкор зеркально отражается относительно центра.
 
+### v0.18.0 — клик по сохранённому фильтру, печать по выбранным строкам, фикс даты
+- **Клик по чипу «Последние фильтры»** теперь восстанавливает все 4 select'а + поиск (`reapplyLastFilter()`): снимок фильтра (`{basicPlatform, part, modification, order}`) теперь кодируется JSON-строкой в колонку `BatchValue` таблицы `Report_last_filter` (раньше эта колонка не заполнялась — `applyProductFilter()` писал только `label`/`author`), `SearchValue` хранит текст поиска как раньше. Клик по крестику `✕` всё ещё удаляет запись (`stopPropagation()` не даёт ему всплыть до клика по чипу).
+- **`printPdf()` переписан**: печатает не «строку под курсором» (`state.selectedRecord`/`grist.onRecord`/`guessColumn` — этот механизм целиком убран как мёртвый код), а **все отмеченные чекбоксом строки** результата (`state.selectedProductIds`). Если ничего не выбрано — тост с просьбой выбрать строку.
+  - `serial` ← `Products.product_code` отмеченной строки.
+  - `config` ← `Modifications.mode_code` модификации этой строки (для этого `refreshCatalog()` теперь дополнительно сохраняет `code` в `state.catalog.modifications`).
+  - `date` ← дата с главного экрана, **без префикса** «дата:» (см. ниже).
+  - Логика проставления значений в поля шаблона вынесена в отдельную `stampTemplateFields(doc, font, fields, values)` (без изменений по сути — тот же расчёт рамки/центрирования/поворота, что и раньше, просто переиспользуется в цикле).
+  - Для каждой выбранной строки шаблон грузится заново (`PDFLib.PDFDocument.load(pdfBytes)`) и проставляется отдельно, затем все страницы склеиваются в один результирующий `PDFDocument` через `copyPages()`/`addPage()` — итог: один PDF на N выбранных строк × страниц шаблона.
+- **Фикс даты**: `formatRuDate()` снова возвращает «голое» значение (`месяц год`, без префикса) — префикс «дата: » теперь добавляется только в `initDate()`/обработчике `#date-pick` при выводе на экран (`$('#date-display').textContent`), а не внутри самой функции. Раньше префикс был зашит в `formatRuDate()` (v0.16.0), из-за чего он случайно протекал и в `printPdf()`, который раньше читал текст прямо из DOM (`$('#date-display').textContent`). Теперь `printPdf()` берёт дату из нового `state.selectedDate` (обновляется в `initDate()`/`#date-pick`) и форматирует её сам — экран и PDF больше не делят один и тот же закэшированный текст.
+
 ### v0.17.0 — каскадный фильтр по каталогу изделий (Products)
 - Старый плейсхолдер-фильтр (`batch-select`/`order-select` с автодетектом колонок «партия/заказ» по произвольной привязанной таблице — `populateFilterDropdowns`/`guessColumn`-для-фильтра/`applyFilter`/`resetFilter`/`renderResultTable`/`setRecords`) заменён на полноценный каскадный фильтр по реальной схеме каталога изделий (см. §6). `guessColumn()` сама осталась — её отдельно использует `printPdf()` для автодетекта колонок config/serial в строке под курсором, это не трогали.
 - 4 select'а в `#filter-bar`: **Базовое изделие** (`Basic_platforms.basic_platform`) → **Партия** (`Parts.f_name`) → **Исполнение** (`Modifications.mode_name`) → **Заказ** (`Orders.name`). Эти 4 таблицы НЕ ссылаются друг на друга напрямую — каждая отдельно связана с `Products` (хаб-таблица: `Products.part→Parts`, `Products.mode_name→Modifications`, `Products.order→Orders`, `Products.basic_platform→Basic_platforms`, последнее — уже существующая Grist-триггер-формула, см. ниже). Поэтому каскад устроен как фасетный фильтр по списку `Products`, а не как обход цепочки FK: `filteredProducts(excludeField)` фильтрует `state.catalog.products` по всем заданным полям кроме `excludeField`, `renderFilterOptions()` пересчитывает options каждого select'а из `filteredProducts(<своё поле>)` и сбрасывает выбор поля, если он перестал встречаться среди продуктов.
@@ -218,7 +228,7 @@ widget_report_grist/
 ### Ключевые константы (`index.html`, верх `<script>`)
 
 ```javascript
-const VERSION   = 'v0.17.0';   // единственная константа версии; дублируется в package.json
+const VERSION   = 'v0.18.0';   // единственная константа версии; дублируется в package.json
 
 const RU_MONTHS = ['январь','февраль',...,'декабрь'];
 // STORAGE_KEY / FILTERS_KEY удалены в v0.9.0 — хранение только в Grist-таблицах
@@ -255,8 +265,9 @@ const RU_MONTHS = ['январь','февраль',...,'декабрь'];
 |---|---|
 | `refreshTemplates()` / `persistTemplate()` | чтение/запись Grist-таблицы `Report_template` (id — константа `TABLE_TEMPLATES`) |
 | `refreshLastFilters()` / `pushLastFilter()` | чтение/запись Grist-таблицы `Report_last_filter` (id — константа `TABLE_LAST_FILTERS`) |
-| `printPdf()` / `loadCyrillicFontBytes()` | впечатывание значений в PDF через `pdf-lib` + `fontkit`; добавление новых типов полей — здесь |
-| `refreshCatalog()` / `filteredProducts()` / `renderFilterOptions()` | каскадный фильтр по каталогу изделий (Basic_platforms/Parts/Modifications/Orders → Products) — см. §6 и changelog v0.17.0 |
+| `printPdf()` / `stampTemplateFields()` / `loadCyrillicFontBytes()` | впечатывание значений в PDF через `pdf-lib` + `fontkit`, по одной копии шаблона на каждую отмеченную чекбоксом строку, склейка в один файл (с v0.18.0); добавление новых типов полей — здесь |
+| `refreshCatalog()` / `filteredProducts()` / `renderFilterOptions()` | каскадный фильтр по каталогу изделий (Basic_platforms/Parts/Modifications/Orders → Products) — см. §6 и changelog v0.17.0/v0.18.0 |
+| `reapplyLastFilter()` | восстановление фильтра по клику на чип «Последние фильтры» (с v0.18.0) |
 | `initGrist()` | `grist.onRecord` → `state.selectedRecord` (источник для `config`/`serial` при печати); чтение текущего пользователя пока не реализовано |
 
 ---
@@ -301,6 +312,7 @@ const RU_MONTHS = ['январь','февраль',...,'декабрь'];
 | `Parts` | `f_name` | Text (формула `f"({create_year}) {name}"`) | «Партия» в фильтре |
 | `Parts` | `basic_platform` | Ref:Basic_platforms | (не используется фильтром напрямую — каскад идёт через `Products`) |
 | `Modifications` | `mode_name` | Text | «Исполнение» в фильтре |
+| `Modifications` | `mode_code` | Text | печатается в поле типа `config` при печати (с v0.18.0) |
 | `Modifications` | `basic_platform` | Ref:Basic_platforms | (аналогично — не используется напрямую) |
 | `Orders` | `name` | Text (формула, авто) | «Заказ» в фильтре |
 | `Products` | `product_code` | Text | «Код изделия» в результате |
