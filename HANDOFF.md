@@ -10,7 +10,7 @@
 - **Репозиторий:** https://github.com/Altair666/widget_report_grist
 - **Live (GitHub Pages):** https://altair666.github.io/widget_report_grist/
 - **Целевой Grist-документ:** `db.mp-lab.ru`, организация `mp-lab`, документ **«LMP данные изделий»** (id `48G8NAEGKuLnpgBo36bWHM`). Уточнено 2026-06-19 через Grist API (read-only) — там же лежат `Report_template`/`Report_last_filter` (см. §5) и каталог изделий `Basic_platforms`/`Parts`/`Modifications`/`Orders`/`Products` (см. §6). Старое указание на `lmp-test-dec.getgrist.com/5GtDphApyrjG` было устаревшим/неверным — не использовать.
-- **Текущая версия:** `v0.19.0`
+- **Текущая версия:** `v0.20.0`
 - **Стек:** один `index.html` (HTML + CSS + vanilla JS), `pdf.js` с CDN, `grist-plugin-api.js` с CDN.
 
 ---
@@ -165,6 +165,12 @@ export GRIST_API_KEY="..."
 ### v0.11.0 — центрирование «впечатанного» текста в рамке поля при печати
 - **`printPdf()`**: значение каждого поля (`config`/`serial`/`date`) теперь центрируется и по горизонтали, и по вертикали внутри «рамки» — прямоугольника той же ширины, что и `.placed-field` в редакторе (`--field-w`, переведена из CSS-px в pt через коэффициент рендера pdf.js `1.4`), высотой `size + 2×3pt`. Отступы сверху/снизу получаются автоматически за счёт центрирования. Якорная точка `drawText` вычисляется через `font.widthOfTextAtSize`/`font.heightAtSize` (ascent/descent), чтобы видимый блок текста, а не базовая линия, оказался в центре рамки; для повёрнутых на 180° полей анкор зеркально отражается относительно центра.
 
+### v0.20.0 — шаблон привязан к базовому изделию
+- Новая колонка `Report_template.BasicPlatform` (Int, id строки `Basic_platforms`) — добавлена пользователем вручную в Grist (я доступа на запись в этот документ не имею, см. §5).
+- `refreshTemplates()` читает её в `tpl.basicPlatform` (defensive — не упадёт, если колонки ещё нет); `persistTemplate()` пишет `BasicPlatform: tpl.basicPlatform || null`.
+- `showEditor(null)` (создание нового шаблона) наследует `state.productFilter.basicPlatform` — то, что выбрано в фильтре «Базовое изделие» на главном экране сейчас. Если в фильтре ничего не выбрано — шаблон создаётся «универсальным» (`basicPlatform: null`). Редактирование существующего шаблона сохраняет его текущую привязку как есть (платформа не переписывается автоматически).
+- `templatesForCurrentFilter()` — новая функция: если в фильтре выбрана платформа, список = шаблоны с этой платформой **+ универсальные** (без `basicPlatform`); если платформа не выбрана — список не ограничивается. Используется в `openTemplatePicker()` (модалка «Выбрать шаблон»). Уже выбранный/редактируемый шаблон (`state.selectedTemplate`/`state.editingTemplate`) ищется по-прежнему через нефильтрованный `getTemplates()` — смена фильтра не снимает уже выбранный шаблон.
+
 ### v0.19.0 — ленивая загрузка Products (SQL первично, fetchTable как fallback)
 - **Гейтинг**: `Products` (потенциально огромная таблица — по строке на физическое изделие) больше не грузится при открытии виджета и не показывается без фильтра. Список изделий и опции «Исполнение»/«Заказ» появляются только после выбора **обоих** — «Базовое изделие» и «Партия» (`maybeLoadProducts()`). До этого момента таблица результатов показывает «Выберите базовое изделие и партию, чтобы загрузить список изделий», а не пустой список и не полную выгрузку.
   - `refreshCatalog()` теперь грузит эагерно только 4 лёгких справочника: `Basic_platforms`, `Parts`, `Modifications`, `Orders` (без `Products`).
@@ -238,7 +244,7 @@ widget_report_grist/
 ### Ключевые константы (`index.html`, верх `<script>`)
 
 ```javascript
-const VERSION   = 'v0.19.0';   // единственная константа версии; дублируется в package.json
+const VERSION   = 'v0.20.0';   // единственная константа версии; дублируется в package.json
 
 const RU_MONTHS = ['январь','февраль',...,'декабрь'];
 // STORAGE_KEY / FILTERS_KEY удалены в v0.9.0 — хранение только в Grist-таблицах
@@ -278,6 +284,7 @@ const RU_MONTHS = ['январь','февраль',...,'декабрь'];
 | `printPdf()` / `stampTemplateFields()` / `loadCyrillicFontBytes()` | впечатывание значений в PDF через `pdf-lib` + `fontkit`, по одной копии шаблона на каждую отмеченную чекбоксом строку, склейка в один файл (с v0.18.0); добавление новых типов полей — здесь |
 | `refreshCatalog()` / `filteredProducts()` / `renderFilterOptions()` | каскадный фильтр по каталогу изделий (Basic_platforms/Parts/Modifications/Orders → Products) — см. §6 и changelog v0.17.0/v0.18.0 |
 | `reapplyLastFilter()` | восстановление фильтра по клику на чип «Последние фильтры» (с v0.18.0) |
+| `templatesForCurrentFilter()` | список шаблонов для модалки «Выбрать шаблон», отфильтрованный по выбранной платформе + универсальные (с v0.20.0) |
 | `initGrist()` | `grist.onRecord` → `state.selectedRecord` (источник для `config`/`serial` при печати); чтение текущего пользователя пока не реализовано |
 
 ---
@@ -297,6 +304,7 @@ const RU_MONTHS = ['январь','февраль',...,'декабрь'];
 | `PdfBase64`  | Text          | PDF в base64 |
 | `UpdatedAt`  | DateTime      | время изменения |
 | `UpdatedBy`  | Text          | автор |
+| `BasicPlatform` | Int        | id строки `Basic_platforms` — привязка шаблона к платформе (с v0.20.0). Добавлена **вручную пользователем** в Grist 2026-06-19 — я доступа на запись в этот документ не имею. Пусто/не задано = «универсальный» шаблон, виден независимо от фильтра (см. `templatesForCurrentFilter()`). Код defensive: `(data.BasicPlatform && data.BasicPlatform[i])` в `refreshTemplates()` — не упадёт, если колонку ещё не добавили. |
 
 ### Report_last_filter
 

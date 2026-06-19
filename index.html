@@ -411,7 +411,7 @@
 /* ====================================================================
    GLOBAL STATE
    ==================================================================== */
-const VERSION = 'v0.19.0';
+const VERSION = 'v0.20.0';
 
 // Grist table ids (service tables for templates / last-used filters).
 const TABLE_TEMPLATES = 'Report_template';
@@ -498,6 +498,15 @@ function withTimeout(promise, ms = 20000) {
 
 function getTemplates() { return state.templates; }
 
+// Templates with no BasicPlatform are "universal" - always shown. Templates
+// tied to a specific platform only show once that platform is picked in the
+// main filter; with no platform picked, nothing is restricted.
+function templatesForCurrentFilter() {
+  const bp = state.productFilter.basicPlatform;
+  if (!bp) return state.templates;
+  return state.templates.filter(t => !t.basicPlatform || t.basicPlatform === bp);
+}
+
 async function refreshTemplates() {
   if (!state.gristFull) return;
   try {
@@ -511,6 +520,9 @@ async function refreshTemplates() {
       pdfBase64: data.PdfBase64[i] || null,
       updatedAt: (data.UpdatedAt[i] || 0) * 1000,
       updatedBy: data.UpdatedBy[i] || '',
+      // BasicPlatform column added in Grist manually (2026-06-19, see HANDOFF
+      // §6) - guard with `&&` in case an older doc doesn't have it yet.
+      basicPlatform: (data.BasicPlatform && data.BasicPlatform[i]) || null,
     }));
   } catch (e) {
     console.error('Grist fetchTable(Templates) failed', e);
@@ -532,6 +544,7 @@ async function persistTemplate(tpl) {
       PdfBase64: tpl.pdfBase64 || '',
       UpdatedAt: Math.floor(tpl.updatedAt / 1000),
       UpdatedBy: tpl.updatedBy || '',
+      BasicPlatform: tpl.basicPlatform || null,
     };
     const action = tpl._rowId
       ? ['UpdateRecord', TABLE_TEMPLATES, tpl._rowId, fields]
@@ -634,7 +647,13 @@ function showEditor(existingTplId = null) {
       $('#count-input').value = tpl.groupCount;
     }
   } else {
-    state.editingTemplate = { id: uuid(), name: '', fields: [], pdfBase64: null, groupCount: 1 };
+    state.editingTemplate = {
+      id: uuid(), name: '', fields: [], pdfBase64: null, groupCount: 1,
+      // New templates inherit whichever "Базовое изделие" is picked in the
+      // main filter right now; with none picked, the template stays
+      // "universal" (visible regardless of the filter) - see templatesForCurrentFilter().
+      basicPlatform: state.productFilter.basicPlatform || null,
+    };
     state.placedFields = [];
     state.groupCount = 1;
     state.pdfBase64 = null;
@@ -688,7 +707,7 @@ function syncFilterBarHeight() {
    MAIN VIEW — TEMPLATE PICKER MODAL
    ==================================================================== */
 function openTemplatePicker() {
-  const templates = getTemplates();
+  const templates = templatesForCurrentFilter();
   let selected = state.selectedTemplate;
 
   const back = document.createElement('div');
@@ -1468,6 +1487,7 @@ async function saveTemplate() {
     pdfBase64: state.pdfBase64,
     updatedAt: Date.now(),
     updatedBy: state.filterAuthor,
+    basicPlatform: state.editingTemplate.basicPlatform || null,
   };
   const ok = await persistTemplate(tpl);
   if (!ok) return;
