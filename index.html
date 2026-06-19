@@ -80,30 +80,32 @@
     background: var(--panel);
     border: 1px solid var(--border);
     border-radius: var(--radius);
-    padding: 8px 10px;
+    padding: 5px 10px;
     display: flex; flex-direction: column; justify-content: center;
   }
   .ctl-label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px; }
   .ctl-btn {
     background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius);
-    padding: 8px 10px; display: flex; flex-direction: column; align-items: center; justify-content: center;
-    gap: 4px; text-align: center; font-weight: 500;
+    padding: 5px 10px; display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 2px; text-align: center; font-weight: 500;
   }
   .ctl-btn:hover:not(:disabled) { background: #f0f4ff; border-color: var(--accent); color: var(--accent); }
   .ctl-btn .sub { font-size: 11px; color: var(--muted); font-weight: 400; }
 
-  #date-display { font-size: 16px; font-weight: 600; }
-  #date-pick { margin-top: 6px; width: 100%; }
+  #date-display { font-size: 14px; font-weight: 600; }
+  #date-pick { margin-top: 3px; width: 100%; }
   #tpl-selected { font-size: 13px; color: var(--accent); font-weight: 500; }
 
   /* --- Filter bar: full width, height synced to #controls-row via JS --- */
   #filter-bar {
     display: flex; gap: 8px; align-items: center; flex-wrap: wrap;
+    padding: 4px 10px;
   }
   .filter-inline label { font-size: 12px; color: var(--muted); display: flex; align-items: center; gap: 4px; }
   .filter-inline select, .filter-inline input {
-    border: 1px solid var(--border); border-radius: 4px; padding: 4px 8px;
+    border: 1px solid var(--border); border-radius: 4px; padding: 2px 6px;
   }
+  #filter-bar .toolbar-btn { padding: 4px 10px; }
 
   /* --- Bottom area: filter results --- */
   #filter-section {
@@ -307,12 +309,10 @@
 
   <div id="controls-row">
     <div class="ctl date-cell">
-      <span class="ctl-label">Дата</span>
       <span id="date-display"></span>
       <input type="date" id="date-pick" />
     </div>
     <div class="ctl select-cell ctl-btn" id="btn-select-tpl">
-      <span class="ctl-label">Шаблон</span>
       <strong>Выбрать шаблон</strong>
       <span id="tpl-selected" class="sub">не выбран</span>
     </div>
@@ -409,7 +409,7 @@
 /* ====================================================================
    GLOBAL STATE
    ==================================================================== */
-const VERSION = 'v0.15.0';
+const VERSION = 'v0.16.0';
 
 // Grist table ids (service tables for templates / last-used filters).
 const TABLE_TEMPLATES = 'Report_template';
@@ -462,7 +462,7 @@ const RU_MONTHS = ['январь','февраль','март','апрель','м
                    'июль','август','сентябрь','октябрь','ноябрь','декабрь'];
 
 function formatRuDate(d) {
-  return `${RU_MONTHS[d.getMonth()]} ${d.getFullYear()}`;
+  return `дата: ${RU_MONTHS[d.getMonth()]} ${d.getFullYear()}`;
 }
 
 /* ====================================================================
@@ -658,13 +658,13 @@ function initDate() {
 }
 
 // #filter-bar is a separate grid row from #controls-row, so CSS alone can't
-// equalize their heights — measure the buttons row and apply it as the
-// filter bar's height.
+// size it relative to that row — measure the buttons row and apply half its
+// height to the filter bar.
 function syncFilterBarHeight() {
   const row = $('#controls-row');
   const bar = $('#filter-bar');
   if (!row || !bar) return;
-  bar.style.minHeight = row.getBoundingClientRect().height + 'px';
+  bar.style.minHeight = (row.getBoundingClientRect().height * 0.5) + 'px';
 }
 
 /* ====================================================================

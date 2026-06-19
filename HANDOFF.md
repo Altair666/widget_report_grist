@@ -10,7 +10,7 @@
 - **Репозиторий:** https://github.com/Altair666/widget_report_grist
 - **Live (GitHub Pages):** https://altair666.github.io/widget_report_grist/
 - **Целевой Grist-документ:** https://lmp-test-dec.getgrist.com/5GtDphApyrjG/LMP-ESKD
-- **Текущая версия:** `v0.15.0`
+- **Текущая версия:** `v0.16.0`
 - **Стек:** один `index.html` (HTML + CSS + vanilla JS), `pdf.js` с CDN, `grist-plugin-api.js` с CDN.
 
 ---
@@ -165,6 +165,13 @@ export GRIST_API_KEY="..."
 ### v0.11.0 — центрирование «впечатанного» текста в рамке поля при печати
 - **`printPdf()`**: значение каждого поля (`config`/`serial`/`date`) теперь центрируется и по горизонтали, и по вертикали внутри «рамки» — прямоугольника той же ширины, что и `.placed-field` в редакторе (`--field-w`, переведена из CSS-px в pt через коэффициент рендера pdf.js `1.4`), высотой `size + 2×3pt`. Отступы сверху/снизу получаются автоматически за счёт центрирования. Якорная точка `drawText` вычисляется через `font.widthOfTextAtSize`/`font.heightAtSize` (ascent/descent), чтобы видимый блок текста, а не базовая линия, оказался в центре рамки; для повёрнутых на 180° полей анкор зеркально отражается относительно центра.
 
+### v0.16.0 — компактнее: формат даты, без лейбла «Шаблон», высоты блоков
+- `#date-display`: текст теперь `дата: <месяц> <год>` (префикс зашит в `formatRuDate()`), отдельный `<span class="ctl-label">Дата</span>` над ним убран.
+- У «Выбрать шаблон» убран верхний лейбл `<span class="ctl-label">Шаблон</span>` — остались только `<strong>Выбрать шаблон</strong>` и подпись «не выбран»/имя шаблона.
+- `.ctl`/`.ctl-btn`: padding `8px 10px` → `5px 10px`, `.ctl-btn` gap `4px` → `2px`, `#date-display` `16px` → `14px`, `#date-pick` margin-top `6px` → `3px` — высота `#controls-row` ушла с ~89px до ~59px (≈‑33%, ориентир был «уменьшить на 30%»).
+- `#filter-bar`: собственный `padding` `4px 10px` (переопределяет `10px` от `.panel`), `.filter-inline select/input` padding `4px 8px` → `2px 6px`, `#filter-bar .toolbar-btn` padding переопределён на `4px 10px` (точечно, не трогая `.toolbar-btn` глобально — те же кнопки используются в редакторе шаблона и модалках). Высота `#filter-bar` ушла с ~89px до ~39px.
+- `syncFilterBarHeight()`: теперь ставит `#filter-bar` высоту в **0.5×** высоты `#controls-row` (было 1×) — отражает требование «высоту строки с фильтрацией уменьшить на 50%» относительно ряда кнопок.
+
 ### v0.15.0 — переименование служебных таблиц Grist
 - В самом Grist-документе таблицы переименованы: `Templates` → `Report_template`, `LastFilters` → `Report_last_filter` (id таблицы, не только отображаемое имя).
 - В коде заведены константы `TABLE_TEMPLATES = 'Report_template'` и `TABLE_LAST_FILTERS = 'Report_last_filter'` (верх `<script>`, рядом с `VERSION`); все вызовы `grist.docApi.fetchTable(...)`/`applyUserActions([...])` в `refreshTemplates`/`persistTemplate`/`refreshLastFilters`/`pushLastFilter`/`deleteLastFilter` переведены на эти константы вместо строковых литералов — следующее переименование таблицы потребует правки в одном месте.
@@ -202,7 +209,7 @@ widget_report_grist/
 ### Ключевые константы (`index.html`, верх `<script>`)
 
 ```javascript
-const VERSION   = 'v0.15.0';   // единственная константа версии; дублируется в package.json
+const VERSION   = 'v0.16.0';   // единственная константа версии; дублируется в package.json
 
 const RU_MONTHS = ['январь','февраль',...,'декабрь'];
 // STORAGE_KEY / FILTERS_KEY удалены в v0.9.0 — хранение только в Grist-таблицах
