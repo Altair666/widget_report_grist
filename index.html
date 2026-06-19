@@ -411,7 +411,7 @@
 /* ====================================================================
    GLOBAL STATE
    ==================================================================== */
-const VERSION = 'v0.18.0';
+const VERSION = 'v0.19.0';
 
 // Grist table ids (service tables for templates / last-used filters).
 const TABLE_TEMPLATES = 'Report_template';
@@ -444,6 +444,7 @@ const state = {
   catalog: { basicPlatforms: [], parts: [], modifications: [], orders: [], products: [] },
   productFilter: { basicPlatform: '', part: '', modification: '', order: '', search: '' },
   selectedProductIds: new Set(),
+  productsLoading: false,       // true while maybeLoadProducts() is in flight
 };
 
 /* PDF.js worker */
@@ -765,7 +766,7 @@ function renderLastFilters() {
 // Restores the 4 cascading selects + search text from a saved "last filter"
 // chip. The filter snapshot rides in Report_last_filter's BatchValue column
 // as JSON (OrderValue/SearchValue keep their original single-value meaning).
-function reapplyLastFilter(idx) {
+async function reapplyLastFilter(idx) {
   const entry = state.lastFilters[idx];
   if (!entry) return;
   let snap = {};
@@ -778,7 +779,9 @@ function reapplyLastFilter(idx) {
     search: entry.searchValue || '',
   };
   $('#filter-search').value = state.productFilter.search;
-  renderFilterOptions();
+  renderBasicAndPartOptions();
+  await maybeLoadProducts();
+  renderModeAndOrderOptions();
   renderProductResults();
   toast('Фильтр применён');
 }
@@ -797,29 +800,22 @@ function reapplyLastFilter(idx) {
 async function refreshCatalog() {
   if (!state.gristFull) { renderProductResults(); return; }
   try {
-    const [bp, parts, mods, orders, products] = await Promise.all([
+    const [bp, parts, mods, orders] = await Promise.all([
       withTimeout(grist.docApi.fetchTable(TABLE_BASIC_PLATFORMS)),
       withTimeout(grist.docApi.fetchTable(TABLE_PARTS)),
       withTimeout(grist.docApi.fetchTable(TABLE_MODIFICATIONS)),
       withTimeout(grist.docApi.fetchTable(TABLE_ORDERS)),
-      withTimeout(grist.docApi.fetchTable(TABLE_PRODUCTS)),
     ]);
     state.catalog.basicPlatforms = (bp.id || []).map((id, i) => ({ id, name: bp.basic_platform[i] || '' }));
-    state.catalog.parts = (parts.id || []).map((id, i) => ({ id, name: parts.f_name[i] || '' }));
+    state.catalog.parts = (parts.id || []).map((id, i) => ({ id, name: parts.f_name[i] || '', basicPlatformId: parts.basic_platform[i] || null }));
     state.catalog.modifications = (mods.id || []).map((id, i) => ({ id, name: mods.mode_name[i] || '', code: mods.mode_code[i] || '' }));
     state.catalog.orders = (orders.id || []).map((id, i) => ({ id, name: orders.name[i] || '' }));
-    state.catalog.products = (products.id || []).map((id, i) => ({
-      id,
-      productCode: products.product_code[i] || '',
-      partId: products.part[i] || null,
-      modeId: products.mode_name[i] || null,
-      orderId: products.order[i] || null,
-      basicPlatformId: products.basic_platform[i] || null,
-    }));
   } catch (e) {
     console.error('Grist fetchTable(product catalog) failed', e);
     toast('Не удалось загрузить справочники изделий из Grist');
   }
+  // Products (potentially a huge table - one row per physical unit) is
+  // never fetched here; see maybeLoadProducts().
   renderFilterOptions();
   renderProductResults();
 }
@@ -828,6 +824,90 @@ function catalogMap(list) {
   const m = new Map();
   list.forEach(x => m.set(x.id, x));
   return m;
+}
+
+function sortByName(list) {
+  return [...list].sort((a, b) => a.name.localeCompare(b.name, 'ru'));
+}
+
+// Maps one Products row - {fields: {...}} from the SQL endpoint, or a plain
+// column-value object assembled from fetchTable - to our catalog shape.
+function mapProductRow(row) {
+  return {
+    id: row.id,
+    productCode: row.product_code || '',
+    partId: row.part || null,
+    modeId: row.mode_name || null,
+    orderId: row.order || null,
+    basicPlatformId: row.basic_platform || null,
+  };
+}
+
+// Primary path: ask Grist's read-only SQL endpoint to filter server-side, so
+// only matching rows ever cross the wire. Uses a short-lived access token
+// obtained from inside the widget (grist.docApi.getAccessToken) - never a
+// long-lived key baked into this file, which ships to every Grist user who
+// opens the widget.
+async function loadProductsViaSql(basicPlatformId, partId) {
+  const tokenInfo = await withTimeout(grist.docApi.getAccessToken({ readOnly: true }));
+  const sql = `SELECT id, product_code, mode_name, "order", basic_platform, part FROM ${TABLE_PRODUCTS} WHERE basic_platform = ? AND part = ?`;
+  const res = await withTimeout(fetch(`${tokenInfo.baseUrl}/sql?auth=${tokenInfo.token}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ sql, args: [basicPlatformId, partId] }),
+  }));
+  if (!res.ok) throw new Error(`SQL endpoint HTTP ${res.status}`);
+  const data = await res.json();
+  return (data.records || []).map(r => mapProductRow(r.fields));
+}
+
+// Fallback path: pull the whole table over the existing docApi RPC (no
+// token/network request involved) and filter client-side. Used only if the
+// SQL endpoint call above fails (older Grist version, disabled, network).
+async function loadProductsViaFetch(basicPlatformId, partId) {
+  const data = await withTimeout(grist.docApi.fetchTable(TABLE_PRODUCTS));
+  const rows = (data.id || []).map((id, i) => ({
+    id,
+    product_code: data.product_code[i],
+    part: data.part[i],
+    mode_name: data.mode_name[i],
+    order: data.order[i],
+    basic_platform: data.basic_platform[i],
+  }));
+  return rows.filter(r => r.basic_platform === basicPlatformId && r.part === partId).map(mapProductRow);
+}
+
+async function loadProductsForFilter(basicPlatformId, partId) {
+  try {
+    return await loadProductsViaSql(basicPlatformId, partId);
+  } catch (e) {
+    console.warn('Products via SQL failed, falling back to fetchTable', e);
+    return await loadProductsViaFetch(basicPlatformId, partId);
+  }
+}
+
+// Products only loads once both "Базовое изделие" and "Партия" are picked -
+// that pair is exactly what both loaders filter by - so the (potentially
+// huge) Products table is never pulled in full and the result list never
+// shows/loads everything with no filter.
+async function maybeLoadProducts() {
+  const f = state.productFilter;
+  state.selectedProductIds.clear(); // checked rows belong to the previously loaded set, now gone
+  if (!f.basicPlatform || !f.part) {
+    state.catalog.products = [];
+    return;
+  }
+  state.productsLoading = true;
+  renderProductResults();
+  try {
+    state.catalog.products = await loadProductsForFilter(f.basicPlatform, f.part);
+  } catch (e) {
+    console.error('Failed to load products (both SQL and fetch failed)', e);
+    toast('Не удалось загрузить изделия из Grist');
+    state.catalog.products = [];
+  } finally {
+    state.productsLoading = false;
+  }
 }
 
 // Products matching the current filter, optionally ignoring one field (so a
@@ -857,7 +937,7 @@ function filteredProducts(excludeField) {
 function uniqueCatalogItems(products, key, catalogList) {
   const map = catalogMap(catalogList);
   const ids = [...new Set(products.map(p => p[key]).filter(Boolean))];
-  return ids.map(id => map.get(id)).filter(Boolean).sort((a, b) => a.name.localeCompare(b.name, 'ru'));
+  return sortByName(ids.map(id => map.get(id)).filter(Boolean));
 }
 
 function fillFilterSelect(sel, items, currentValue) {
@@ -869,20 +949,40 @@ function fillFilterSelect(sel, items, currentValue) {
   return keep;
 }
 
-// Rebuilds each dropdown's option list from the other three filters, and
-// silently drops a filter value if it no longer matches any product (e.g.
-// after a sibling filter changed).
-function renderFilterOptions() {
+// Базовое изделие/Партия come straight from the (always fully loaded, small)
+// lookup tables - Parts.basic_platform is a direct ref, no Products needed.
+// Исполнение/Заказ are derived from state.catalog.products, which is empty
+// until both of the above are picked (see maybeLoadProducts) - so those two
+// dropdowns naturally stay empty until then, with no special-casing here.
+// Always available - depends only on the small, eagerly-loaded lookup
+// tables (Parts.basic_platform is a direct ref, no Products needed).
+function renderBasicAndPartOptions() {
   const f = state.productFilter;
-  if (!fillFilterSelect('#bp-select', uniqueCatalogItems(filteredProducts('basicPlatform'), 'basicPlatformId', state.catalog.basicPlatforms), f.basicPlatform)) f.basicPlatform = '';
-  if (!fillFilterSelect('#part-select', uniqueCatalogItems(filteredProducts('part'), 'partId', state.catalog.parts), f.part)) f.part = '';
+  if (!fillFilterSelect('#bp-select', sortByName(state.catalog.basicPlatforms), f.basicPlatform)) f.basicPlatform = '';
+  const partCandidates = f.basicPlatform
+    ? state.catalog.parts.filter(p => p.basicPlatformId === f.basicPlatform)
+    : state.catalog.parts;
+  if (!fillFilterSelect('#part-select', sortByName(partCandidates), f.part)) f.part = '';
+}
+
+// Depends on state.catalog.products, which is only populated once both of
+// the above are picked (see maybeLoadProducts) - call after that resolves.
+function renderModeAndOrderOptions() {
+  const f = state.productFilter;
   if (!fillFilterSelect('#mode-select', uniqueCatalogItems(filteredProducts('modification'), 'modeId', state.catalog.modifications), f.modification)) f.modification = '';
   if (!fillFilterSelect('#order-select', uniqueCatalogItems(filteredProducts('order'), 'orderId', state.catalog.orders), f.order)) f.order = '';
 }
 
-function onProductFilterChange(field, rawValue) {
+function renderFilterOptions() {
+  renderBasicAndPartOptions();
+  renderModeAndOrderOptions();
+}
+
+async function onProductFilterChange(field, rawValue) {
   state.productFilter[field] = rawValue ? Number(rawValue) : '';
-  renderFilterOptions();
+  renderBasicAndPartOptions();
+  await maybeLoadProducts();
+  renderModeAndOrderOptions();
   renderProductResults();
 }
 
@@ -893,11 +993,19 @@ function renderProductResults() {
     t.querySelector('tbody').innerHTML = '<tr><td><span class="filter-empty">Каталог изделий доступен только при подключении к Grist (полный доступ)</span></td></tr>';
     return;
   }
-  const list = filteredProducts(null);
   t.querySelector('thead').innerHTML = `<tr>
     <th><label style="display:flex;align-items:center;gap:4px;font-weight:600;white-space:normal;cursor:pointer;"><input type="checkbox" id="select-all-rows"> Выделить все</label></th>
     <th>Базовое изделие</th><th>Партия</th><th>Исполнение</th><th>Заказ</th><th>Код изделия</th>
   </tr>`;
+  if (!state.productFilter.basicPlatform || !state.productFilter.part) {
+    t.querySelector('tbody').innerHTML = '<tr><td colspan="6"><span class="filter-empty">Выберите базовое изделие и партию, чтобы загрузить список изделий</span></td></tr>';
+    return;
+  }
+  if (state.productsLoading) {
+    t.querySelector('tbody').innerHTML = '<tr><td colspan="6"><span class="filter-empty">Загрузка изделий…</span></td></tr>';
+    return;
+  }
+  const list = filteredProducts(null);
   if (!list.length) {
     t.querySelector('tbody').innerHTML = '<tr><td colspan="6"><span class="filter-empty">Нет изделий по выбранным фильтрам</span></td></tr>';
   } else {
@@ -964,6 +1072,7 @@ function applyProductFilter() {
 
 function resetProductFilter() {
   state.productFilter = { basicPlatform: '', part: '', modification: '', order: '', search: '' };
+  state.catalog.products = [];
   state.selectedProductIds.clear();
   $('#filter-search').value = '';
   renderFilterOptions();
