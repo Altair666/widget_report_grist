@@ -9,8 +9,8 @@
 - **Что:** custom widget для [Grist](https://www.getgrist.com/) — генерация отчётов из таблиц по PDF-шаблонам с настраиваемым расположением полей через drag-and-drop.
 - **Репозиторий:** https://github.com/Altair666/widget_report_grist
 - **Live (GitHub Pages):** https://altair666.github.io/widget_report_grist/
-- **Целевой Grist-документ:** https://lmp-test-dec.getgrist.com/5GtDphApyrjG/LMP-ESKD
-- **Текущая версия:** `v0.16.0`
+- **Целевой Grist-документ:** `db.mp-lab.ru`, организация `mp-lab`, документ **«LMP данные изделий»** (id `48G8NAEGKuLnpgBo36bWHM`). Уточнено 2026-06-19 через Grist API (read-only) — там же лежат `Report_template`/`Report_last_filter` (см. §5) и каталог изделий `Basic_platforms`/`Parts`/`Modifications`/`Orders`/`Products` (см. §6). Старое указание на `lmp-test-dec.getgrist.com/5GtDphApyrjG` было устаревшим/неверным — не использовать.
+- **Текущая версия:** `v0.17.0`
 - **Стек:** один `index.html` (HTML + CSS + vanilla JS), `pdf.js` с CDN, `grist-plugin-api.js` с CDN.
 
 ---
@@ -114,7 +114,7 @@ export GRIST_API_KEY="..."
   - поля типа `date` — берут текст из `#date-display` (дата отчёта на главном экране);
   - поля типа `config`/`serial` — берут значения из текущей строки Grist под курсором (`grist.onRecord` → `state.selectedRecord`), колонки определяются автодетектом (`конфигурац*`/`config`, `серийн*`/`serial`/`s/n`);
   - результат — сгенерированный PDF открывается в новой вкладке.
-- Группы 2+ при печати пока не получают отдельных значений (нужны доп. таблицы-источники серийных номеров — отдельная задача, см. раздел 6).
+- Группы 2+ при печати пока не получают отдельных значений (нужны доп. таблицы-источники серийных номеров — отдельная задача, см. раздел 7 п.6).
 - Имя автора фильтра НЕ менялось — Grist API не отдаёт виджету личность пользователя, остаётся `'неизвестный пользователь'`.
 
 ### v0.5.0 — редактор: повороты полей, раскладка, фикс drag&drop
@@ -165,6 +165,15 @@ export GRIST_API_KEY="..."
 ### v0.11.0 — центрирование «впечатанного» текста в рамке поля при печати
 - **`printPdf()`**: значение каждого поля (`config`/`serial`/`date`) теперь центрируется и по горизонтали, и по вертикали внутри «рамки» — прямоугольника той же ширины, что и `.placed-field` в редакторе (`--field-w`, переведена из CSS-px в pt через коэффициент рендера pdf.js `1.4`), высотой `size + 2×3pt`. Отступы сверху/снизу получаются автоматически за счёт центрирования. Якорная точка `drawText` вычисляется через `font.widthOfTextAtSize`/`font.heightAtSize` (ascent/descent), чтобы видимый блок текста, а не базовая линия, оказался в центре рамки; для повёрнутых на 180° полей анкор зеркально отражается относительно центра.
 
+### v0.17.0 — каскадный фильтр по каталогу изделий (Products)
+- Старый плейсхолдер-фильтр (`batch-select`/`order-select` с автодетектом колонок «партия/заказ» по произвольной привязанной таблице — `populateFilterDropdowns`/`guessColumn`-для-фильтра/`applyFilter`/`resetFilter`/`renderResultTable`/`setRecords`) заменён на полноценный каскадный фильтр по реальной схеме каталога изделий (см. §6). `guessColumn()` сама осталась — её отдельно использует `printPdf()` для автодетекта колонок config/serial в строке под курсором, это не трогали.
+- 4 select'а в `#filter-bar`: **Базовое изделие** (`Basic_platforms.basic_platform`) → **Партия** (`Parts.f_name`) → **Исполнение** (`Modifications.mode_name`) → **Заказ** (`Orders.name`). Эти 4 таблицы НЕ ссылаются друг на друга напрямую — каждая отдельно связана с `Products` (хаб-таблица: `Products.part→Parts`, `Products.mode_name→Modifications`, `Products.order→Orders`, `Products.basic_platform→Basic_platforms`, последнее — уже существующая Grist-триггер-формула, см. ниже). Поэтому каскад устроен как фасетный фильтр по списку `Products`, а не как обход цепочки FK: `filteredProducts(excludeField)` фильтрует `state.catalog.products` по всем заданным полям кроме `excludeField`, `renderFilterOptions()` пересчитывает options каждого select'а из `filteredProducts(<своё поле>)` и сбрасывает выбор поля, если он перестал встречаться среди продуктов.
+- `refreshCatalog()` — параллельно (`Promise.all`) тянет все 5 таблиц через `grist.docApi.fetchTable()` (как `refreshTemplates`/`refreshLastFilters`) в `state.catalog.{basicPlatforms,parts,modifications,orders,products}`; вызывается из `initGrist()` после full-доступа.
+- Итоговая таблица (`renderProductResults()`) — пересобирает `#result-table` целиком: шапка с чекбоксом **«Выделить все»** + колонками Базовое изделие/Партия/Исполнение/Заказ/Код изделия (`Products.product_code`), строки — чекбокс на каждую запись (`state.selectedProductIds`, `Set` id выбранных `Products`). «Выделить все» отмечает/снимает только видимые (отфильтрованные) строки.
+- «Применить» теперь просто пишет текущий набор фильтров в `Report_last_filter` (через уже существующий `pushLastFilter()`) — сама фильтрация результата живая, срабатывает на каждое изменение select'а/поиска без отдельного клика. «Сбросить» очищает все 4 фильтра, поиск и выбранные чекбоксы.
+- `state.records`/`state.columns` и подписка `grist.onRecords(...)` удалены как неиспользуемые (они обслуживали только старый плейсхолдер-фильтр); `grist.onRecord(...)` → `state.selectedRecord` оставлен — на нём всё ещё держится автоподстановка config/serial в `printPdf()`.
+- Уточнение по доступу: схема каталога подтверждена через Grist API только на чтение (ключ пользователя, `db.mp-lab.ru`); запись в Grist не производилась — не разрешалась в этой задаче.
+
 ### v0.16.0 — компактнее: формат даты, без лейбла «Шаблон», высоты блоков
 - `#date-display`: текст теперь `дата: <месяц> <год>` (префикс зашит в `formatRuDate()`), отдельный `<span class="ctl-label">Дата</span>` над ним убран.
 - У «Выбрать шаблон» убран верхний лейбл `<span class="ctl-label">Шаблон</span>` — остались только `<strong>Выбрать шаблон</strong>` и подпись «не выбран»/имя шаблона.
@@ -209,7 +218,7 @@ widget_report_grist/
 ### Ключевые константы (`index.html`, верх `<script>`)
 
 ```javascript
-const VERSION   = 'v0.16.0';   // единственная константа версии; дублируется в package.json
+const VERSION   = 'v0.17.0';   // единственная константа версии; дублируется в package.json
 
 const RU_MONTHS = ['январь','февраль',...,'декабрь'];
 // STORAGE_KEY / FILTERS_KEY удалены в v0.9.0 — хранение только в Grist-таблицах
@@ -247,14 +256,14 @@ const RU_MONTHS = ['январь','февраль',...,'декабрь'];
 | `refreshTemplates()` / `persistTemplate()` | чтение/запись Grist-таблицы `Report_template` (id — константа `TABLE_TEMPLATES`) |
 | `refreshLastFilters()` / `pushLastFilter()` | чтение/запись Grist-таблицы `Report_last_filter` (id — константа `TABLE_LAST_FILTERS`) |
 | `printPdf()` / `loadCyrillicFontBytes()` | впечатывание значений в PDF через `pdf-lib` + `fontkit`; добавление новых типов полей — здесь |
-| `populateFilterDropdowns()` | автодетект колонок партии/заказа — расширить под реальные имена таблицы Grist |
+| `refreshCatalog()` / `filteredProducts()` / `renderFilterOptions()` | каскадный фильтр по каталогу изделий (Basic_platforms/Parts/Modifications/Orders → Products) — см. §6 и changelog v0.17.0 |
 | `initGrist()` | `grist.onRecord` → `state.selectedRecord` (источник для `config`/`serial` при печати); чтение текущего пользователя пока не реализовано |
 
 ---
 
 ## 5. Служебные таблицы Grist (созданы)
 
-Таблицы созданы в документе `5GtDphApyrjG` на `lmp-test-dec.getgrist.com` прямым POST `/api/docs/5GtDphApyrjG/tables`. `DateTime`-колонки создались без явной таймзоны (тип `DateTime`, Grist хранит как Unix timestamp в секундах). С v0.15.0 id таблиц — `Report_template` и `Report_last_filter` (переименованы вручную в Grist, ранее были `Templates`/`LastFilters` — см. константы `TABLE_TEMPLATES`/`TABLE_LAST_FILTERS` в `index.html`).
+Изначально созданы прямым POST `/api/docs/{docId}/tables` в документе `5GtDphApyrjG` на `lmp-test-dec.getgrist.com`; сейчас (подтверждено 2026-06-19 через API) живут в документе `48G8NAEGKuLnpgBo36bWHM` («LMP данные изделий») на `db.mp-lab.ru`, орг. `mp-lab` — см. §0. `DateTime`-колонки без явной таймзоны (Grist хранит как Unix timestamp в секундах). С v0.15.0 id таблиц — `Report_template` и `Report_last_filter` (переименованы вручную в Grist, ранее были `Templates`/`LastFilters` — см. константы `TABLE_TEMPLATES`/`TABLE_LAST_FILTERS` в `index.html`).
 
 ### Report_template
 
@@ -282,19 +291,41 @@ const RU_MONTHS = ['январь','февраль',...,'декабрь'];
 
 ---
 
-## 6. Открытые задачи (по приоритету)
+## 6. Каталог изделий (продуктовый фильтр, с v0.17.0)
 
-1. ~~**Создать таблицы**~~ — выполнено (v0.4.0), см. раздел 5.
-2. ~~**Миграция localStorage → Grist**~~ — выполнено (v0.4.0): `refreshTemplates`/`persistTemplate`, `refreshLastFilters`/`pushLastFilter`. `PdfBase64` пока пишется как обычный `Text` без чанкования (см. п.6 — риск остаётся для больших PDF).
-3. ~~**«Впечатывание» значений в PDF при печати**~~ — выполнено (v0.4.0) через `pdf-lib` + `@pdf-lib/fontkit` (DejaVu Sans). `date` ← дата на главном экране; `config`/`serial` ← автодетект колонок в `state.selectedRecord` (строка под курсором в Grist). Группы 2+ значений не получают (см. п.7).
-4. **Имя текущего пользователя** — сознательно не делали: Grist plugin API не отдаёт виджету личность реального пользователя. `state.filterAuthor = 'неизвестный пользователь'` остаётся как есть. Если понадобится — единственный реалистичный путь: запросить имя один раз через `prompt()` и хранить в `localStorage` браузера (per-user/per-browser).
-5. **Привязка к источнику данных Grist** — автодетект колонок «партия/заказ» работает, но имена могут отличаться в реальной таблице LMP-ESKD. Возможно, добавить настройки виджета через `grist.setOptions`.
-6. **Чанкование PDF в Grist** — поле Text в Grist имеет лимит, большие PDF (>1 МБ) могут не сохраниться. Альтернатива — attachment-колонка через `/api/docs/{docId}/attachments`.
-7. **Множественный выбор и групповая печать** — печать всех групп за один PDF. Значения для групп 2+ должны браться из отдельных таблиц-источников серийных номеров (по договорённости — отдельная задача, схема таблиц-источников пока не определена).
+Источник данных для каскадного фильтра на главном экране (см. changelog v0.17.0). Все 5 таблиц — в том же документе, что и `Report_template`/`Report_last_filter` (§5). Схема подтверждена 2026-06-19 через Grist API (read-only).
+
+| Таблица | Колонка (id) | Тип | Назначение |
+|---|---|---|---|
+| `Basic_platforms` | `basic_platform` | Text | название — «Базовое изделие» в фильтре |
+| `Parts` | `f_name` | Text (формула `f"({create_year}) {name}"`) | «Партия» в фильтре |
+| `Parts` | `basic_platform` | Ref:Basic_platforms | (не используется фильтром напрямую — каскад идёт через `Products`) |
+| `Modifications` | `mode_name` | Text | «Исполнение» в фильтре |
+| `Modifications` | `basic_platform` | Ref:Basic_platforms | (аналогично — не используется напрямую) |
+| `Orders` | `name` | Text (формула, авто) | «Заказ» в фильтре |
+| `Products` | `product_code` | Text | «Код изделия» в результате |
+| `Products` | `part` | Ref:Parts | связь с Партией |
+| `Products` | `mode_name` | Ref:Modifications | связь с Исполнением |
+| `Products` | `order` | Ref:Orders | связь с Заказом |
+| `Products` | `basic_platform` | Ref:Basic_platforms, **trigger formula** (`isFormula:false` + текст формулы, не live-формула) | `if $part: return $part.basic_platform` / `if $kni_plate: return 22  # КМГ-1 id`. Уже существует в Grist именно в таком виде — это и есть триггерная формула, про которую просили в задаче; менять не пришлось. `$kni_plate` — это `Ref:Products` («Пластина КНИ»), а не Bool, как могло показаться из названия. |
+
+`Basic_platforms`/`Parts`/`Modifications`/`Orders` не ссылаются друг на друга — `Products` единственная таблица-хаб, через которую строится каскад (см. `filteredProducts()` в `index.html`).
 
 ---
 
-## 7. Команды для разработки
+## 7. Открытые задачи (по приоритету)
+
+1. ~~**Создать таблицы**~~ — выполнено (v0.4.0), см. раздел 5.
+2. ~~**Миграция localStorage → Grist**~~ — выполнено (v0.4.0): `refreshTemplates`/`persistTemplate`, `refreshLastFilters`/`pushLastFilter`. `PdfBase64` пока пишется как обычный `Text` без чанкования (см. п.5 — риск остаётся для больших PDF).
+3. ~~**«Впечатывание» значений в PDF при печати**~~ — выполнено (v0.4.0) через `pdf-lib` + `@pdf-lib/fontkit` (DejaVu Sans). `date` ← дата на главном экране; `config`/`serial` ← автодетект колонок в `state.selectedRecord` (строка под курсором в Grist). Группы 2+ значений не получают (см. п.6).
+4. **Имя текущего пользователя** — сознательно не делали: Grist plugin API не отдаёт виджету личность реального пользователя. `state.filterAuthor = 'неизвестный пользователь'` остаётся как есть. Если понадобится — единственный реалистичный путь: запросить имя один раз через `prompt()` и хранить в `localStorage` браузера (per-user/per-browser).
+5. **Чанкование PDF в Grist** — поле Text в Grist имеет лимит, большие PDF (>1 МБ) могут не сохраниться. Альтернатива — attachment-колонка через `/api/docs/{docId}/attachments`.
+6. **Множественный выбор и групповая печать** — печать всех групп за один PDF. Значения для групп 2+ должны браться из отдельных таблиц-источников серийных номеров (по договорённости — отдельная задача, схема таблиц-источников пока не определена). С v0.17.0 в результатах фильтра появились чекбоксы выбора строк (`state.selectedProductIds`) — вероятно, это задел именно под эту задачу (печать/действие по выделенным), но сама печать по выделенным пока не реализована — только сбор выбора в UI.
+7. **Старое указание `lmp-test-dec.getgrist.com`** — исправлено в §0/§5 на актуальный `db.mp-lab.ru`/`48G8NAEGKuLnpgBo36bWHM`; неясно, когда и как произошла миграция документа — если всплывут ссылки на старый URL в других местах (вне этого репо), уточнить у пользователя.
+
+---
+
+## 8. Команды для разработки
 
 ```bash
 # Клонировать
@@ -315,7 +346,7 @@ GitHub Pages обновляется автоматически при push в `m
 
 ---
 
-## 8. Хронология чата (краткие саммари сообщений)
+## 9. Хронология чата (краткие саммари сообщений)
 
 | # | От | Что |
 |---|---|---|
@@ -337,7 +368,7 @@ GitHub Pages обновляется автоматически при push в `m
 
 ---
 
-## 9. Что подсунуть Claude Code как стартовый prompt
+## 10. Что подсунуть Claude Code как стартовый prompt
 
 ```
 Загрузи репозиторий https://github.com/Altair666/widget_report_grist и прочитай HANDOFF.md.

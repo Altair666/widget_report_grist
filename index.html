@@ -335,7 +335,9 @@
   </div>
 
   <div class="panel filter-inline" id="filter-bar">
-    <label>Партия: <select id="batch-select"><option value="">— все —</option></select></label>
+    <label>Базовое изделие: <select id="bp-select"><option value="">— все —</option></select></label>
+    <label>Партия: <select id="part-select"><option value="">— все —</option></select></label>
+    <label>Исполнение: <select id="mode-select"><option value="">— все —</option></select></label>
     <label>Заказ: <select id="order-select"><option value="">— все —</option></select></label>
     <label>Поиск: <input type="text" id="filter-search" placeholder="текст..." /></label>
     <button class="toolbar-btn" id="apply-filter">Применить</button>
@@ -346,7 +348,7 @@
     <div class="panel" id="filter-results">
       <table id="result-table">
         <thead><tr><th>—</th></tr></thead>
-        <tbody><tr><td><span class="filter-empty">Подключите таблицу в Grist (виджет → Custom → выберите источник данных)</span></td></tr></tbody>
+        <tbody><tr><td><span class="filter-empty">Загрузка каталога изделий из Grist…</span></td></tr></tbody>
       </table>
     </div>
   </div>
@@ -409,11 +411,19 @@
 /* ====================================================================
    GLOBAL STATE
    ==================================================================== */
-const VERSION = 'v0.16.0';
+const VERSION = 'v0.17.0';
 
 // Grist table ids (service tables for templates / last-used filters).
 const TABLE_TEMPLATES = 'Report_template';
 const TABLE_LAST_FILTERS = 'Report_last_filter';
+
+// Grist table ids for the product search catalog (Basic_platforms / Parts /
+// Modifications / Orders, joined through the Products hub table).
+const TABLE_BASIC_PLATFORMS = 'Basic_platforms';
+const TABLE_PARTS = 'Parts';
+const TABLE_MODIFICATIONS = 'Modifications';
+const TABLE_ORDERS = 'Orders';
+const TABLE_PRODUCTS = 'Products';
 
 const state = {
   view: 'main',                 // 'main' | 'editor'
@@ -426,12 +436,14 @@ const state = {
   groupCount: 1,
   filterAuthor: 'неизвестный пользователь',
   tableId: null,
-  records: [],
-  columns: [],
   gristFull: false,             // true if grist.docApi (requiredAccess:'full') is available
   templates: [],                // cached Templates (Grist table; empty without full access)
   lastFilters: [],              // cached LastFilters (Grist table; session-only without full access)
-  selectedRecord: null,         // record under cursor in the linked Grist table
+  selectedRecord: null,         // record under cursor in the linked Grist table (used by printPdf())
+  // Product search catalog (Basic_platforms -> Parts/Modifications/Orders -> Products hub), see refreshCatalog().
+  catalog: { basicPlatforms: [], parts: [], modifications: [], orders: [], products: [] },
+  productFilter: { basicPlatform: '', part: '', modification: '', order: '', search: '' },
+  selectedProductIds: new Set(),
 };
 
 /* PDF.js worker */
@@ -746,33 +758,16 @@ function renderLastFilters() {
 }
 
 /* ====================================================================
-   MAIN VIEW — FILTER & RESULTS  (Grist integration)
+   MAIN VIEW — FILTER & RESULTS  (product catalog, see HANDOFF.md §5/§6)
+
+   Basic_platforms / Parts / Modifications / Orders don't reference each
+   other directly — they each connect to Products (the hub table:
+   Products.part -> Parts, Products.mode_name -> Modifications,
+   Products.order -> Orders, Products.basic_platform -> Basic_platforms,
+   the last one via an existing Grist trigger formula). So the four
+   dropdowns cascade by filtering the Products list, not by walking a
+   direct table-to-table chain.
    ==================================================================== */
-function setRecords(records) {
-  state.records = records || [];
-  if (records && records.length) {
-    state.columns = Object.keys(records[0]).filter(k => k !== 'id');
-  }
-  renderResultTable(state.records);
-  populateFilterDropdowns(state.records);
-}
-
-function populateFilterDropdowns(records) {
-  const batchSel = $('#batch-select');
-  const orderSel = $('#order-select');
-  const batchCol = guessColumn(records, ['partiya','партия','batch','party']);
-  const orderCol = guessColumn(records, ['order','заказ','zakaz','order_no']);
-
-  batchSel.innerHTML = '<option value="">— все —</option>';
-  orderSel.innerHTML = '<option value="">— все —</option>';
-  if (batchCol) [...new Set(records.map(r => r[batchCol]).filter(Boolean))].forEach(v =>
-    batchSel.insertAdjacentHTML('beforeend', `<option>${escapeHtml(v)}</option>`));
-  if (orderCol) [...new Set(records.map(r => r[orderCol]).filter(Boolean))].forEach(v =>
-    orderSel.insertAdjacentHTML('beforeend', `<option>${escapeHtml(v)}</option>`));
-  batchSel.dataset.col = batchCol || '';
-  orderSel.dataset.col = orderCol || '';
-}
-
 function guessColumn(records, candidates) {
   if (!records.length) return null;
   const keys = Object.keys(records[0]).map(k => [k, k.toLowerCase()]);
@@ -783,54 +778,175 @@ function guessColumn(records, candidates) {
   return null;
 }
 
-function renderResultTable(records) {
+async function refreshCatalog() {
+  if (!state.gristFull) { renderProductResults(); return; }
+  try {
+    const [bp, parts, mods, orders, products] = await Promise.all([
+      withTimeout(grist.docApi.fetchTable(TABLE_BASIC_PLATFORMS)),
+      withTimeout(grist.docApi.fetchTable(TABLE_PARTS)),
+      withTimeout(grist.docApi.fetchTable(TABLE_MODIFICATIONS)),
+      withTimeout(grist.docApi.fetchTable(TABLE_ORDERS)),
+      withTimeout(grist.docApi.fetchTable(TABLE_PRODUCTS)),
+    ]);
+    state.catalog.basicPlatforms = (bp.id || []).map((id, i) => ({ id, name: bp.basic_platform[i] || '' }));
+    state.catalog.parts = (parts.id || []).map((id, i) => ({ id, name: parts.f_name[i] || '' }));
+    state.catalog.modifications = (mods.id || []).map((id, i) => ({ id, name: mods.mode_name[i] || '' }));
+    state.catalog.orders = (orders.id || []).map((id, i) => ({ id, name: orders.name[i] || '' }));
+    state.catalog.products = (products.id || []).map((id, i) => ({
+      id,
+      productCode: products.product_code[i] || '',
+      partId: products.part[i] || null,
+      modeId: products.mode_name[i] || null,
+      orderId: products.order[i] || null,
+      basicPlatformId: products.basic_platform[i] || null,
+    }));
+  } catch (e) {
+    console.error('Grist fetchTable(product catalog) failed', e);
+    toast('Не удалось загрузить справочники изделий из Grist');
+  }
+  renderFilterOptions();
+  renderProductResults();
+}
+
+function catalogMap(list) {
+  const m = new Map();
+  list.forEach(x => m.set(x.id, x));
+  return m;
+}
+
+// Products matching the current filter, optionally ignoring one field (so a
+// dropdown can list options including the one already selected in itself).
+function filteredProducts(excludeField) {
+  const f = state.productFilter;
+  let list = state.catalog.products;
+  if (f.basicPlatform && excludeField !== 'basicPlatform') list = list.filter(p => p.basicPlatformId === f.basicPlatform);
+  if (f.part && excludeField !== 'part') list = list.filter(p => p.partId === f.part);
+  if (f.modification && excludeField !== 'modification') list = list.filter(p => p.modeId === f.modification);
+  if (f.order && excludeField !== 'order') list = list.filter(p => p.orderId === f.order);
+  if (f.search) {
+    const s = f.search.toLowerCase();
+    const bpMap = catalogMap(state.catalog.basicPlatforms), partMap = catalogMap(state.catalog.parts),
+          modMap = catalogMap(state.catalog.modifications), ordMap = catalogMap(state.catalog.orders);
+    list = list.filter(p => [
+      p.productCode,
+      bpMap.get(p.basicPlatformId)?.name,
+      partMap.get(p.partId)?.name,
+      modMap.get(p.modeId)?.name,
+      ordMap.get(p.orderId)?.name,
+    ].some(v => String(v ?? '').toLowerCase().includes(s)));
+  }
+  return list;
+}
+
+function uniqueCatalogItems(products, key, catalogList) {
+  const map = catalogMap(catalogList);
+  const ids = [...new Set(products.map(p => p[key]).filter(Boolean))];
+  return ids.map(id => map.get(id)).filter(Boolean).sort((a, b) => a.name.localeCompare(b.name, 'ru'));
+}
+
+function fillFilterSelect(sel, items, currentValue) {
+  const el = $(sel);
+  const keep = items.some(it => it.id === currentValue);
+  el.innerHTML = '<option value="">— все —</option>' +
+    items.map(it => `<option value="${it.id}">${escapeHtml(it.name)}</option>`).join('');
+  el.value = keep ? currentValue : '';
+  return keep;
+}
+
+// Rebuilds each dropdown's option list from the other three filters, and
+// silently drops a filter value if it no longer matches any product (e.g.
+// after a sibling filter changed).
+function renderFilterOptions() {
+  const f = state.productFilter;
+  if (!fillFilterSelect('#bp-select', uniqueCatalogItems(filteredProducts('basicPlatform'), 'basicPlatformId', state.catalog.basicPlatforms), f.basicPlatform)) f.basicPlatform = '';
+  if (!fillFilterSelect('#part-select', uniqueCatalogItems(filteredProducts('part'), 'partId', state.catalog.parts), f.part)) f.part = '';
+  if (!fillFilterSelect('#mode-select', uniqueCatalogItems(filteredProducts('modification'), 'modeId', state.catalog.modifications), f.modification)) f.modification = '';
+  if (!fillFilterSelect('#order-select', uniqueCatalogItems(filteredProducts('order'), 'orderId', state.catalog.orders), f.order)) f.order = '';
+}
+
+function onProductFilterChange(field, rawValue) {
+  state.productFilter[field] = rawValue ? Number(rawValue) : '';
+  renderFilterOptions();
+  renderProductResults();
+}
+
+function renderProductResults() {
   const t = $('#result-table');
-  if (!records || !records.length) {
+  if (!state.gristFull) {
     t.querySelector('thead').innerHTML = '<tr><th>—</th></tr>';
-    t.querySelector('tbody').innerHTML = '<tr><td><span class="filter-empty">Нет данных</span></td></tr>';
+    t.querySelector('tbody').innerHTML = '<tr><td><span class="filter-empty">Каталог изделий доступен только при подключении к Grist (полный доступ)</span></td></tr>';
     return;
   }
-  const cols = state.columns;
-  t.querySelector('thead').innerHTML = '<tr>' + cols.map(c => `<th>${escapeHtml(c)}</th>`).join('') + '</tr>';
-  t.querySelector('tbody').innerHTML = records.slice(0, 500).map(r =>
-    '<tr>' + cols.map(c => `<td>${escapeHtml(r[c] ?? '')}</td>`).join('') + '</tr>'
-  ).join('');
+  const list = filteredProducts(null);
+  t.querySelector('thead').innerHTML = `<tr>
+    <th><label style="display:flex;align-items:center;gap:4px;font-weight:600;white-space:normal;cursor:pointer;"><input type="checkbox" id="select-all-rows"> Выделить все</label></th>
+    <th>Базовое изделие</th><th>Партия</th><th>Исполнение</th><th>Заказ</th><th>Код изделия</th>
+  </tr>`;
+  if (!list.length) {
+    t.querySelector('tbody').innerHTML = '<tr><td colspan="6"><span class="filter-empty">Нет изделий по выбранным фильтрам</span></td></tr>';
+  } else {
+    const bpMap = catalogMap(state.catalog.basicPlatforms), partMap = catalogMap(state.catalog.parts),
+          modMap = catalogMap(state.catalog.modifications), ordMap = catalogMap(state.catalog.orders);
+    t.querySelector('tbody').innerHTML = list.map(p => `<tr>
+      <td><input type="checkbox" class="row-select" data-id="${p.id}" ${state.selectedProductIds.has(p.id) ? 'checked' : ''}></td>
+      <td>${escapeHtml(bpMap.get(p.basicPlatformId)?.name || '')}</td>
+      <td>${escapeHtml(partMap.get(p.partId)?.name || '')}</td>
+      <td>${escapeHtml(modMap.get(p.modeId)?.name || '')}</td>
+      <td>${escapeHtml(ordMap.get(p.orderId)?.name || '')}</td>
+      <td>${escapeHtml(p.productCode)}</td>
+    </tr>`).join('');
+  }
+  bindResultRowCheckboxes();
 }
 
-function applyFilter() {
-  const batchVal = $('#batch-select').value;
-  const orderVal = $('#order-select').value;
-  const searchVal = $('#filter-search').value.trim().toLowerCase();
-  const batchCol = $('#batch-select').dataset.col;
-  const orderCol = $('#order-select').dataset.col;
-
-  let recs = state.records;
-  if (batchVal && batchCol) recs = recs.filter(r => String(r[batchCol]) === batchVal);
-  if (orderVal && orderCol) recs = recs.filter(r => String(r[orderCol]) === orderVal);
-  if (searchVal) recs = recs.filter(r =>
-    Object.values(r).some(v => String(v ?? '').toLowerCase().includes(searchVal))
-  );
-  renderResultTable(recs);
-
-  // remember filter
-  const parts = [];
-  if (batchVal) parts.push(`партия: ${batchVal}`);
-  if (orderVal) parts.push(`заказ: ${orderVal}`);
-  if (searchVal) parts.push(`поиск: ${searchVal}`);
-  if (parts.length) pushLastFilter({
-    label: parts.join(', '),
-    author: state.filterAuthor,
-    batchValue: batchVal,
-    orderValue: orderVal,
-    searchValue: searchVal,
+function bindResultRowCheckboxes() {
+  $$('.row-select').forEach(cb => {
+    cb.addEventListener('change', () => {
+      const id = Number(cb.dataset.id);
+      if (cb.checked) state.selectedProductIds.add(id); else state.selectedProductIds.delete(id);
+      updateSelectAllCheckbox();
+    });
   });
+  const all = $('#select-all-rows');
+  if (all) {
+    all.addEventListener('change', () => {
+      const visibleIds = filteredProducts(null).map(p => p.id);
+      if (all.checked) visibleIds.forEach(id => state.selectedProductIds.add(id));
+      else visibleIds.forEach(id => state.selectedProductIds.delete(id));
+      renderProductResults();
+    });
+  }
+  updateSelectAllCheckbox();
 }
 
-function resetFilter() {
-  $('#batch-select').value = '';
-  $('#order-select').value = '';
+function updateSelectAllCheckbox() {
+  const all = $('#select-all-rows');
+  if (!all) return;
+  const visible = filteredProducts(null);
+  all.checked = visible.length > 0 && visible.every(p => state.selectedProductIds.has(p.id));
+}
+
+function applyProductFilter() {
+  const f = state.productFilter;
+  const bpMap = catalogMap(state.catalog.basicPlatforms), partMap = catalogMap(state.catalog.parts),
+        modMap = catalogMap(state.catalog.modifications), ordMap = catalogMap(state.catalog.orders);
+  const parts = [];
+  if (f.basicPlatform) parts.push(`база: ${bpMap.get(f.basicPlatform)?.name || f.basicPlatform}`);
+  if (f.part) parts.push(`партия: ${partMap.get(f.part)?.name || f.part}`);
+  if (f.modification) parts.push(`исполнение: ${modMap.get(f.modification)?.name || f.modification}`);
+  if (f.order) parts.push(`заказ: ${ordMap.get(f.order)?.name || f.order}`);
+  if (f.search) parts.push(`поиск: ${f.search}`);
+  if (!parts.length) { toast('Фильтр не задан'); return; }
+  pushLastFilter({ label: parts.join(', '), author: state.filterAuthor });
+  toast('Фильтр сохранён');
+}
+
+function resetProductFilter() {
+  state.productFilter = { basicPlatform: '', part: '', modification: '', order: '', search: '' };
+  state.selectedProductIds.clear();
   $('#filter-search').value = '';
-  renderResultTable(state.records);
+  renderFilterOptions();
+  renderProductResults();
 }
 
 /* ====================================================================
@@ -1228,8 +1344,17 @@ function bindEvents() {
   $('#btn-export').addEventListener('click', exportCsv);
   $('#btn-print').addEventListener('click', printPdf);
 
-  $('#apply-filter').addEventListener('click', applyFilter);
-  $('#reset-filter').addEventListener('click', resetFilter);
+  $('#bp-select').addEventListener('change', e => onProductFilterChange('basicPlatform', e.target.value));
+  $('#part-select').addEventListener('change', e => onProductFilterChange('part', e.target.value));
+  $('#mode-select').addEventListener('change', e => onProductFilterChange('modification', e.target.value));
+  $('#order-select').addEventListener('change', e => onProductFilterChange('order', e.target.value));
+  $('#filter-search').addEventListener('input', e => {
+    state.productFilter.search = e.target.value.trim();
+    renderFilterOptions();
+    renderProductResults();
+  });
+  $('#apply-filter').addEventListener('click', applyProductFilter);
+  $('#reset-filter').addEventListener('click', resetProductFilter);
 
   $('#btn-back').addEventListener('click', showMain);
   $('#btn-reset').addEventListener('click', resetTemplate);
@@ -1269,12 +1394,12 @@ async function initGrist() {
     grist.ready({ requiredAccess: 'full' });
     state.gristFull = true;
 
-    grist.onRecords((records) => setRecords(records));
     grist.onRecord((record) => { state.selectedRecord = record; });
   }
 
   await refreshTemplates();
   await refreshLastFilters();
+  await refreshCatalog();
   renderTemplateButtons();
   renderLastFilters();
 }
