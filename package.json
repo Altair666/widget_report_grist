@@ -2,7 +2,7 @@
   "name": "@gristlabs/widget-report",
   "description": "Генератор под печать этикеток",
   "homePage": "https://github.com/gristlabs/grist-widget",
-  "version": "0.20.0",
+  "version": "0.21.0",
   "grist": {
     "name": "Report-print Widget",
     "url": "https://gristlabs.github.io/grist-widget/widget_report_grist/index.html",

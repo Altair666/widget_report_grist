@@ -92,9 +92,13 @@
   .ctl-btn:hover:not(:disabled) { background: #f0f4ff; border-color: var(--accent); color: var(--accent); }
   .ctl-btn .sub { font-size: 11px; color: var(--muted); font-weight: 400; }
 
+  #btn-print { background: #16b378; border-color: #16b378; color: white; }
+  #btn-print .sub { color: rgba(255, 255, 255, 0.85); }
+  #btn-print:hover:not(:disabled) { background: #008e58; border-color: #008e58; color: white; }
+
   #date-display { font-size: 14px; font-weight: 600; }
   #date-pick { margin-top: 3px; width: 100%; }
-  #tpl-selected { font-size: 13px; color: var(--accent); font-weight: 500; }
+  #tpl-selected { font-size: 13px; color: #222; font-weight: 500; }
 
   /* --- Filter bar: full width, height synced to #controls-row via JS --- */
   #filter-bar {
@@ -277,7 +281,7 @@
     margin-bottom: 4px; cursor: pointer;
   }
   .modal li:hover { background: #f0f4ff; border-color: var(--accent); }
-  .modal li.selected { background: var(--accent); color: white; border-color: var(--accent); }
+  .modal li.selected { background: var(--muted); color: white; border-color: var(--muted); border-radius: 4px; }
   .modal li.empty { font-style: italic; color: var(--muted); cursor: default; }
   .modal li.empty:hover { background: transparent; border-color: var(--border); }
   .modal-actions { display: flex; justify-content: flex-end; gap: 8px; }
@@ -411,7 +415,7 @@
 /* ====================================================================
    GLOBAL STATE
    ==================================================================== */
-const VERSION = 'v0.20.0';
+const VERSION = 'v0.21.0';
 
 // Grist table ids (service tables for templates / last-used filters).
 const TABLE_TEMPLATES = 'Report_template';
