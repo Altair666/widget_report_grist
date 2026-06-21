@@ -89,7 +89,7 @@
     padding: 5px 10px; display: flex; flex-direction: column; align-items: center; justify-content: center;
     gap: 2px; text-align: center; font-weight: 500;
   }
-  .ctl-btn:hover:not(:disabled) { background: #f0f4ff; border-color: var(--accent); color: var(--accent); }
+  .ctl-btn:hover:not(:disabled) { background: #eceef0; border-color: var(--muted); color: #222; }
   .ctl-btn .sub { font-size: 11px; color: var(--muted); font-weight: 400; }
 
   #btn-print { background: #16b378; border-color: #16b378; color: white; }
@@ -98,7 +98,7 @@
 
   #date-display { font-size: 14px; font-weight: 600; }
   #date-pick { margin-top: 3px; width: 100%; }
-  #tpl-selected { font-size: 13px; color: #222; font-weight: 500; }
+  #tpl-selected { font-size: 13px; color: #222; font-weight: 400; }
 
   /* --- Filter bar: full width, height synced to #controls-row via JS --- */
   #filter-bar {
@@ -296,7 +296,7 @@
   #version-badge {
     position: fixed; right: 8px; bottom: 6px;
     font-size: 11px; color: var(--muted); font-family: ui-monospace, Menlo, monospace;
-    background: rgba(255,255,255,0.7); padding: 1px 6px; border-radius: 3px;
+    background: rgba(255,255,255,0.7); border: 1px solid var(--border); padding: 1px 6px; border-radius: 3px;
     pointer-events: none; z-index: 50;
   }
 </style>
@@ -415,7 +415,7 @@
 /* ====================================================================
    GLOBAL STATE
    ==================================================================== */
-const VERSION = 'v0.21.0';
+const VERSION = 'v0.22.0';
 
 // Grist table ids (service tables for templates / last-used filters).
 const TABLE_TEMPLATES = 'Report_template';
