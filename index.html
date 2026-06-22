@@ -418,7 +418,7 @@
 /* ====================================================================
    GLOBAL STATE
    ==================================================================== */
-const VERSION = 'v0.23.0';
+const VERSION = 'v0.24.0';
 
 // Grist table ids (service tables for templates / last-used filters).
 const TABLE_TEMPLATES = 'Report_template';
@@ -1189,13 +1189,17 @@ function stampTemplateFields(doc, font, fields, values) {
     const { width, height } = page.getSize();
     const size = 10;
 
-    // Frame = the placed-field box as seen in the editor (--field-w, in
-    // CSS px at the pdf.js render scale of 1.4 -> 1px = 1/1.4 pt), with
-    // a few points of vertical padding. Text is centered inside it.
+    // Frame = the actual placed-field box as seen in the editor (--field-w/
+    // --field-h, measured in updateFieldWidth() from the real rendered
+    // .draggable-source/.placed-field element, in CSS px at the pdf.js
+    // render scale of 1.4 -> 1px = 1/1.4 pt). Text is centered inside it.
+    // (--field-h used to be a guessed constant - size+2*3pt=16pt - instead
+    // of the real ~23.6pt box, which visibly shifted the printed text off
+    // the true center; see HANDOFF changelog.)
     const fieldWpx = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--field-w')) || 90;
+    const fieldHpx = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--field-h')) || 33;
     const frameW = fieldWpx / 1.4;
-    const framePadding = 3;
-    const frameH = size + framePadding * 2;
+    const frameH = fieldHpx / 1.4;
 
     const leftX = f.x * width;
     const topY = height - f.y * height;
@@ -1485,8 +1489,12 @@ function bindPlacedFieldDrag(el, f) {
 function updateFieldWidth() {
   const ref = document.querySelector('.draggable-source[data-type="config"]');
   if (!ref) return;
-  const w = ref.getBoundingClientRect().width;
-  if (w > 0) document.documentElement.style.setProperty('--field-w', w + 'px');
+  const rect = ref.getBoundingClientRect();
+  if (rect.width > 0) document.documentElement.style.setProperty('--field-w', rect.width + 'px');
+  // Printing centers text using --field-h too (see printPdf/stampTemplateFields) -
+  // .placed-field shares padding/font-size with this badge, so its real
+  // rendered height (not a guessed constant) is what the print frame should match.
+  if (rect.height > 0) document.documentElement.style.setProperty('--field-h', rect.height + 'px');
 }
 
 function redrawPlacedFields() {
