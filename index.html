@@ -279,8 +279,11 @@
   .modal li {
     padding: 8px 10px; border: 1px solid var(--border); border-radius: 4px;
     margin-bottom: 4px; cursor: pointer;
+    display: flex; align-items: center; justify-content: space-between; gap: 8px;
   }
   .modal li:hover { background: #f0f4ff; border-color: var(--accent); }
+  .modal li .x { opacity: 0.5; cursor: pointer; flex: none; }
+  .modal li .x:hover { opacity: 1; color: var(--danger); }
   .modal li.selected { background: var(--muted); color: white; border-color: var(--muted); border-radius: 4px; }
   .modal li.empty { font-style: italic; color: var(--muted); cursor: default; }
   .modal li.empty:hover { background: transparent; border-color: var(--border); }
@@ -415,7 +418,7 @@
 /* ====================================================================
    GLOBAL STATE
    ==================================================================== */
-const VERSION = 'v0.22.0';
+const VERSION = 'v0.23.0';
 
 // Grist table ids (service tables for templates / last-used filters).
 const TABLE_TEMPLATES = 'Report_template';
@@ -711,7 +714,6 @@ function syncFilterBarHeight() {
    MAIN VIEW — TEMPLATE PICKER MODAL
    ==================================================================== */
 function openTemplatePicker() {
-  const templates = templatesForCurrentFilter();
   let selected = state.selectedTemplate;
 
   const back = document.createElement('div');
@@ -719,11 +721,7 @@ function openTemplatePicker() {
   back.innerHTML = `
     <div class="modal">
       <h3>Выбрать шаблон</h3>
-      <ul id="tpl-list">
-        ${templates.length === 0
-          ? '<li class="empty">Шаблонов пока нет — создайте первый</li>'
-          : templates.map(t => `<li data-id="${t.id}" ${t.id===selected?'class="selected"':''}>${escapeHtml(t.name||'(без имени)')}</li>`).join('')}
-      </ul>
+      <ul id="tpl-list"></ul>
       <div class="modal-actions">
         <button class="toolbar-btn" data-act="cancel">Отмена</button>
         <button class="toolbar-btn primary" data-act="ok">OK</button>
@@ -731,13 +729,36 @@ function openTemplatePicker() {
     </div>`;
   document.body.appendChild(back);
 
-  back.querySelectorAll('#tpl-list li[data-id]').forEach(li => {
-    li.addEventListener('click', () => {
-      back.querySelectorAll('#tpl-list li').forEach(x => x.classList.remove('selected'));
-      li.classList.add('selected');
-      selected = li.dataset.id;
+  function renderList() {
+    const templates = templatesForCurrentFilter();
+    const list = back.querySelector('#tpl-list');
+    list.innerHTML = templates.length === 0
+      ? '<li class="empty">Шаблонов пока нет — создайте первый</li>'
+      : templates.map(t => `
+        <li data-id="${t.id}" ${t.id===selected?'class="selected"':''}>
+          <span class="tpl-name">${escapeHtml(t.name||'(без имени)')}</span>
+          <span class="x" data-act="del-tpl" title="Удалить шаблон">✕</span>
+        </li>`).join('');
+
+    list.querySelectorAll('li[data-id]').forEach(li => {
+      li.addEventListener('click', () => {
+        list.querySelectorAll('li').forEach(x => x.classList.remove('selected'));
+        li.classList.add('selected');
+        selected = li.dataset.id;
+      });
+      li.querySelector('[data-act="del-tpl"]').addEventListener('click', async ev => {
+        ev.stopPropagation();
+        const id = li.dataset.id;
+        const ok = await deleteTemplate(id);
+        if (ok) {
+          if (selected === id) selected = null;
+          renderList();
+        }
+      });
     });
-  });
+  }
+  renderList();
+
   back.querySelector('[data-act=cancel]').onclick = () => back.remove();
   back.querySelector('[data-act=ok]').onclick = () => {
     state.selectedTemplate = selected || null;
@@ -745,6 +766,28 @@ function openTemplatePicker() {
     back.remove();
   };
   back.addEventListener('click', e => { if (e.target === back) back.remove(); });
+}
+
+async function deleteTemplate(tplId) {
+  const tpl = state.templates.find(t => t.id === tplId);
+  if (!tpl) return false;
+  if (!confirm(`Удалить шаблон «${tpl.name || '(без имени)'}»? Это действие нельзя отменить.`)) return false;
+
+  if (state.gristFull && tpl._rowId) {
+    try {
+      await withTimeout(grist.docApi.applyUserActions([['RemoveRecord', TABLE_TEMPLATES, tpl._rowId]]));
+    } catch (e) {
+      console.error('Grist RemoveRecord(Templates) failed', e);
+      toast('Не удалось удалить шаблон в Grist');
+      return false;
+    }
+  }
+
+  state.templates = state.templates.filter(t => t.id !== tplId);
+  if (state.selectedTemplate === tplId) state.selectedTemplate = null;
+  renderTemplateButtons();
+  toast('Шаблон удалён');
+  return true;
 }
 
 function escapeHtml(s) {
@@ -1206,16 +1249,27 @@ async function printPdf() {
 
     const outDoc = await PDFLib.PDFDocument.create();
 
-    for (const product of selectedProducts) {
+    // A template with groupCount > 1 has groupCount sets of fields on one
+    // page (e.g. 2 labels per sheet) - so products are printed groupCount at
+    // a time, one per group, instead of one product per template copy.
+    const groupCount = Math.max(1, tpl.groupCount || 1);
+    for (let i = 0; i < selectedProducts.length; i += groupCount) {
+      const chunk = selectedProducts.slice(i, i + groupCount);
       const srcDoc = await PDFLib.PDFDocument.load(pdfBytes);
       srcDoc.registerFontkit(fontkit);
       const font = await srcDoc.embedFont(fontBytes, { subset: true });
-      const values = {
-        date: dateText,
-        config: modMap.get(product.modeId)?.code || '',
-        serial: product.productCode || '',
-      };
-      stampTemplateFields(srcDoc, font, tpl.fields, values);
+
+      chunk.forEach((product, idx) => {
+        const groupNum = idx + 1;
+        const values = {
+          date: dateText,
+          config: modMap.get(product.modeId)?.code || '',
+          serial: product.productCode || '',
+        };
+        const groupFields = tpl.fields.filter(f => f.group === groupNum);
+        stampTemplateFields(srcDoc, font, groupFields, values);
+      });
+
       const copiedPages = await outDoc.copyPages(srcDoc, srcDoc.getPageIndices());
       copiedPages.forEach(p => outDoc.addPage(p));
     }
