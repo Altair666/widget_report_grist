@@ -418,7 +418,7 @@
 /* ====================================================================
    GLOBAL STATE
    ==================================================================== */
-const VERSION = 'v0.24.0';
+const VERSION = 'v0.25.0';
 
 // Grist table ids (service tables for templates / last-used filters).
 const TABLE_TEMPLATES = 'Report_template';
@@ -1176,6 +1176,35 @@ function loadCyrillicFontBytes() {
   return _cyrillicFontBytesPromise;
 }
 
+// pdf-lib's font.heightAtSize() reads the font's hhea ascent/descent, which
+// for DejaVu Sans is sized for full Unicode coverage (accents, exotic
+// scripts) and is much taller than what plain Cyrillic/Latin labels actually
+// use - centering against it leaves text sitting visibly above the true
+// middle of the frame. Canvas TextMetrics' actualBoundingBox*/descent give
+// the real ink extents of the specific string being printed, which is what
+// vertical centering should use instead.
+let _cyrillicCanvasFontPromise = null;
+function loadCyrillicCanvasFont() {
+  if (!_cyrillicCanvasFontPromise) {
+    _cyrillicCanvasFontPromise = loadCyrillicFontBytes().then(async (bytes) => {
+      const face = new FontFace('DejaVuSansStamp', bytes);
+      await face.load();
+      document.fonts.add(face);
+      return face;
+    });
+  }
+  return _cyrillicCanvasFontPromise;
+}
+
+let _measureCtx = null;
+function measureInkExtents(value, size) {
+  if (!_measureCtx) _measureCtx = document.createElement('canvas').getContext('2d');
+  _measureCtx.font = `${size}px DejaVuSansStamp`;
+  const m = _measureCtx.measureText(value);
+  if (m.actualBoundingBoxAscent === undefined) return null; // unsupported browser - caller falls back
+  return { ascent: m.actualBoundingBoxAscent, descent: m.actualBoundingBoxDescent };
+}
+
 // Stamps one set of field values onto an already-loaded template PDFDocument
 // (in place). `values` = { date, config, serial } — plain text per field type.
 function stampTemplateFields(doc, font, fields, values) {
@@ -1207,8 +1236,9 @@ function stampTemplateFields(doc, font, fields, values) {
     const centerY = topY - frameH / 2;
 
     const textWidth = font.widthOfTextAtSize(value, size);
-    const ascent = font.heightAtSize(size, { descender: false });
-    const descent = font.heightAtSize(size) - ascent;
+    const ink = measureInkExtents(value, size);
+    const ascent = ink ? ink.ascent : font.heightAtSize(size, { descender: false });
+    const descent = ink ? ink.descent : font.heightAtSize(size) - ascent;
 
     const drawOpts = { size, font, color: PDFLib.rgb(0, 0, 0) };
     let x, y;
@@ -1249,6 +1279,7 @@ async function printPdf() {
     const pdfBytes = Uint8Array.from(atob(tpl.pdfBase64), c => c.charCodeAt(0));
     const dateText = formatRuDate(state.selectedDate);
     const fontBytes = await loadCyrillicFontBytes();
+    await loadCyrillicCanvasFont(); // needed by measureInkExtents() in stampTemplateFields()
     const modMap = catalogMap(state.catalog.modifications);
 
     const outDoc = await PDFLib.PDFDocument.create();
