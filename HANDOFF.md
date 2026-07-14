@@ -10,7 +10,7 @@
 - **Репозиторий:** https://github.com/Altair666/widget_report_grist
 - **Live (GitHub Pages):** https://altair666.github.io/widget_report_grist/
 - **Целевой Grist-документ:** `db.mp-lab.ru`, организация `mp-lab`, документ **«LMP данные изделий»** (id `48G8NAEGKuLnpgBo36bWHM`). Уточнено 2026-06-19 через Grist API (read-only) — там же лежат `Report_template`/`Report_last_filter` (см. §5) и каталог изделий `Basic_platforms`/`Parts`/`Modifications`/`Orders`/`Products` (см. §6). Старое указание на `lmp-test-dec.getgrist.com/5GtDphApyrjG` было устаревшим/неверным — не использовать.
-- **Текущая версия:** `v0.32.0`
+- **Текущая версия:** `v0.33.0`
 - **Стек:** один `index.html` (HTML + CSS + vanilla JS), `pdf.js` с CDN, `grist-plugin-api.js` с CDN.
 
 ---
@@ -86,6 +86,11 @@ export GRIST_API_KEY="..."
 ## 3. История изменений
 
 **Порядок: новые записи добавляются сверху, сразу после этого заголовка — самая последняя версия должна быть первой, самая старая — последней.** (До 2026-06-19 список был перемешан: записи до v0.11.0 шли по возрастанию, после — по убыванию; восстановлено руками один раз, дальше поддерживается этим правилом.)
+
+### v0.33.0 — fix: PDF открывается в браузере (не сохраняется)
+- `<a download>` заменён на `window.open(url, '_blank')` → PDF снова открывается в новой вкладке браузера. Если `window.open` заблокирован sandbox, fallback на `<a target="_blank">` без атрибута download.
+- `outDoc.setTitle(pdfName)` — браузер/PDF-просмотрщик использует заголовок как предлагаемое имя при сохранении (`report_YYYY-MM-DD`).
+- URL revoke timeout увеличен до 5 минут (300 с) чтобы PDF оставался доступен пока пользователь смотрит/печатает.
 
 ### v0.32.0 — feat+fix: Medium для config/serial/date; OTK левый край; отладка шрифта
 - config / serial / date в PDF теперь рисуются fontMedium (Montserrat Medium).

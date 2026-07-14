@@ -482,7 +482,7 @@
 /* ====================================================================
    GLOBAL STATE
    ==================================================================== */
-const VERSION = 'v0.32.0';
+const VERSION = 'v0.33.0';
 
 // Grist table ids (service tables for templates / last-used filters).
 const TABLE_TEMPLATES = 'Report_template';
@@ -1473,16 +1473,22 @@ async function printPdf() {
       copiedPages.forEach(p => outDoc.addPage(p));
     }
 
+    const pdfName = `report_${new Date().toISOString().slice(0, 10)}`;
+    outDoc.setTitle(pdfName); // browser PDF viewer uses this as suggested save-name
     const outBytes = await outDoc.save();
     const url = URL.createObjectURL(new Blob([outBytes], { type: 'application/pdf' }));
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `report_${new Date().toISOString().slice(0, 10)}.pdf`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    toast('PDF готов — скачивание началось');
-    setTimeout(() => URL.revokeObjectURL(url), 60000);
+    // Open in browser tab (as before). window.open may return null if the Grist
+    // sandbox doesn't include allow-popups; fall back to anchor without download.
+    const w = window.open(url, '_blank');
+    if (!w) {
+      const a = document.createElement('a');
+      a.href = url; a.target = '_blank';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+    }
+    toast('PDF готов');
+    setTimeout(() => URL.revokeObjectURL(url), 300000);
   } catch (e) {
     console.error('printPdf failed', e);
     toast('Ошибка формирования PDF: ' + (e.message || e), 8000);
