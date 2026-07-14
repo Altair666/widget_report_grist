@@ -303,8 +303,25 @@
   .otk-selects #otk-role { flex: 0 0 auto; }
   .otk-selects #otk-person { flex: 0 0 auto; font-weight: 500; }
 
-  .placed-field.type-otk_role { border-color: #9b59b6; background: #f3e8ff; color: #9b59b6; }
-  .placed-field.type-otk_name { border-color: #e67e22; background: #fff3e0; color: #e67e22; }
+  .placed-field.type-otk {
+    border-color: #9b59b6; background: #f3e8ff; color: #333;
+    align-items: center; min-width: 0;
+  }
+  .otk-field-content {
+    display: flex; flex-direction: column; align-items: flex-start; gap: 1px; flex: 1;
+  }
+  .otk-field-role {
+    font-family: 'Montserrat', sans-serif; font-size: 11px; font-weight: 400; line-height: 1.2;
+    color: #555;
+  }
+  .otk-field-name {
+    font-family: 'Montserrat', sans-serif; font-size: 11px; font-weight: 500; line-height: 1.2;
+    color: #222;
+  }
+  .draggable-source[data-type="otk"] {
+    flex-direction: column; align-items: flex-start; gap: 1px; min-width: 120px;
+  }
+  .draggable-source[data-type="otk"] .otk-src-del { align-self: flex-end; }
 
   .toast {
     position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
@@ -408,10 +425,11 @@
           <span class="draggable-source" data-type="serial" draggable="true" style="background:#fdecec;border-color:var(--danger);color:var(--danger);">Серийный № <span class="badge" id="badge-serial" style="background:var(--danger)">1</span></span>
           <button class="rotate-btn" data-type="date" title="Повернуть поля «Дата» активной группы на 180°">↻</button>
           <span class="draggable-source" data-type="date" draggable="true" style="background:#e9f6ed;border-color:var(--ok);color:var(--ok);">Дата <span class="badge" id="badge-date" style="background:var(--ok)">1</span></span>
-          <button class="rotate-btn" data-type="otk_role" title="Повернуть поля «Должность ОТК» активной группы на 180°">↻</button>
-          <span class="draggable-source" data-type="otk_role" draggable="true" style="background:#f3e8ff;border-color:#9b59b6;color:#9b59b6;">Должн. ОТК <span class="badge" id="badge-otk_role" style="background:#9b59b6">1</span></span>
-          <button class="rotate-btn" data-type="otk_name" title="Повернуть поля «ФИО ОТК» активной группы на 180°">↻</button>
-          <span class="draggable-source" data-type="otk_name" draggable="true" style="background:#fff3e0;border-color:#e67e22;color:#e67e22;">ФИО ОТК <span class="badge" id="badge-otk_name" style="background:#e67e22">1</span></span>
+          <button class="rotate-btn" data-type="otk" title="Повернуть блок «ОТК» активной группы на 180°">↻</button>
+          <span class="draggable-source" id="src-otk" data-type="otk" draggable="true" style="background:#f3e8ff;border-color:#9b59b6;">
+            <span class="otk-field-role" id="src-otk-role">Начальник ОТК</span>
+            <span class="otk-field-name" id="src-otk-name">Л.Р. Боев</span>
+          </span>
         </div>
         <div class="group-row">
           <label>Активная группа</label>
@@ -1251,27 +1269,18 @@ function measureInkExtents(value, size) {
 }
 
 // Stamps one set of field values onto an already-loaded template PDFDocument
-// (in place). `values` = { date, config, serial, otk_role, otk_name } — plain text per field type.
-// fontMedium is used for otk_name; fontRegular for all other types.
+// (in place). `values` = { date, config, serial, otk_role, otk_name }.
+// For type "otk": draws two lines (role/regular, name/medium), left-aligned,
+// vertically centered as a group. All other types: centered single line.
 function stampTemplateFields(doc, fontRegular, fontMedium, fields, values) {
   const pages = doc.getPages();
   for (const f of fields) {
     const page = pages[f.page - 1];
     if (!page) continue;
-    const value = values[f.type];
-    if (!value) continue;
-    const font = (f.type === 'otk_name') ? fontMedium : fontRegular;
 
     const { width, height } = page.getSize();
     const size = 10;
 
-    // Frame = the actual placed-field box as seen in the editor (--field-w/
-    // --field-h, measured in updateFieldWidth() from the real rendered
-    // .draggable-source/.placed-field element, in CSS px at the pdf.js
-    // render scale of 1.4 -> 1px = 1/1.4 pt). Text is centered inside it.
-    // (--field-h used to be a guessed constant - size+2*3pt=16pt - instead
-    // of the real ~23.6pt box, which visibly shifted the printed text off
-    // the true center; see HANDOFF changelog.)
     const fieldWpx = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--field-w')) || 90;
     const fieldHpx = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--field-h')) || 33;
     const frameW = fieldWpx / 1.4;
@@ -1279,9 +1288,49 @@ function stampTemplateFields(doc, fontRegular, fontMedium, fields, values) {
 
     const leftX = f.x * width;
     const topY = height - f.y * height;
-    const centerX = leftX + frameW / 2;
     const centerY = topY - frameH / 2;
 
+    if (f.type === 'otk') {
+      // Two-line block: role (regular) above, name (medium) below.
+      // Vertically centered as a pair; horizontally left-aligned.
+      const roleText = values.otk_role || '';
+      const nameText = values.otk_name || '';
+      const lineH = size * 1.35; // line height in pt
+      const blockH = lineH * 2;
+      const xLeft = leftX + 2;
+
+      const roleInk = measureInkExtents(roleText, size);
+      const nameInk = measureInkExtents(nameText, size);
+      const roleAsc = roleInk ? roleInk.ascent : size * 0.75;
+      const roleDesc = roleInk ? roleInk.descent : size * 0.25;
+      const nameAsc = nameInk ? nameInk.ascent : size * 0.75;
+
+      // baseline of role line = centerY + blockH/2 - roleAsc
+      const roleY = centerY + blockH / 2 - roleAsc;
+      const nameY = roleY - lineH + (nameAsc - roleAsc);
+
+      const drawRole = { size, font: fontRegular, color: PDFLib.rgb(0, 0, 0) };
+      const drawName = { size, font: fontMedium,  color: PDFLib.rgb(0, 0, 0) };
+
+      if (f.rotated) {
+        drawRole.rotate = PDFLib.degrees(180);
+        drawName.rotate = PDFLib.degrees(180);
+        const roleW = fontRegular.widthOfTextAtSize(roleText, size);
+        const nameW = fontMedium.widthOfTextAtSize(nameText, size);
+        page.drawText(roleText, { x: xLeft + roleW, y: roleY + roleAsc + roleDesc, ...drawRole });
+        page.drawText(nameText, { x: xLeft + nameW, y: nameY + nameAsc, ...drawName });
+      } else {
+        if (roleText) page.drawText(roleText, { x: xLeft, y: roleY, ...drawRole });
+        if (nameText) page.drawText(nameText, { x: xLeft, y: nameY, ...drawName });
+      }
+      continue;
+    }
+
+    const value = values[f.type];
+    if (!value) continue;
+    const font = fontRegular;
+
+    const centerX = leftX + frameW / 2;
     const textWidth = font.widthOfTextAtSize(value, size);
     const ink = measureInkExtents(value, size);
     const ascent = ink ? ink.ascent : font.heightAtSize(size, { descender: false });
@@ -1290,7 +1339,6 @@ function stampTemplateFields(doc, fontRegular, fontMedium, fields, values) {
     const drawOpts = { size, font, color: PDFLib.rgb(0, 0, 0) };
     let x, y;
     if (f.rotated) {
-      // rotating 180° around (x,y) mirrors the text to the other side of the anchor
       drawOpts.rotate = PDFLib.degrees(180);
       x = centerX + textWidth / 2;
       y = centerY + (ascent - descent) / 2;
@@ -1390,7 +1438,7 @@ function renderGroupTabs() {
   }
 }
 function updateBadges() {
-  ['config','serial','date','otk_role','otk_name'].forEach(t => {
+  ['config','serial','date'].forEach(t => {
     const el = document.getElementById(`badge-${t}`);
     if (el) el.textContent = state.activeGroup;
   });
@@ -1400,7 +1448,7 @@ function updateBadges() {
 // badge is greyed out and stops accepting new drags — only the placed
 // field on the PDF (bindPlacedFieldDrag) can be moved.
 function updateDragSources() {
-  ['config','serial','date','otk_role','otk_name'].forEach(type => {
+  ['config','serial','date','otk'].forEach(type => {
     const src = document.querySelector(`.draggable-source[data-type="${type}"]`);
     if (!src) return;
     const placed = state.placedFields.some(f => f.type === type && f.group === state.activeGroup);
@@ -1592,8 +1640,15 @@ function redrawPlacedFields() {
     const el = document.createElement('div');
     el.className = `placed-field type-${f.type}`;
     el.dataset.id = f.id;
-    const labels = { config: 'Конфиг.', serial: 'Сер.№', date: 'Дата', otk_role: 'Должн.ОТК', otk_name: 'ФИО ОТК' };
-    el.innerHTML = `<span>G${f.group}: ${labels[f.type]}</span><span class="x" data-act="del">✕</span>`;
+    const labels = { config: 'Конфиг.', serial: 'Сер.№', date: 'Дата' };
+    if (f.type === 'otk') {
+      el.innerHTML = `<div class="otk-field-content">
+        <span class="otk-field-role" data-otk-role>${escapeHtml(state.otkRole)}</span>
+        <span class="otk-field-name" data-otk-name>${escapeHtml(state.otkPerson)}</span>
+      </div><span class="x" data-act="del">✕</span>`;
+    } else {
+      el.innerHTML = `<span>G${f.group}: ${labels[f.type]}</span><span class="x" data-act="del">✕</span>`;
+    }
     el.style.left = (f.x * wrap.clientWidth) + 'px';
     el.style.top  = (f.y * wrap.clientHeight) + 'px';
     if (f.rotated) el.style.transform = 'rotate(180deg)';
@@ -1654,6 +1709,20 @@ function resetTemplate() {
 }
 
 /* ====================================================================
+   OTK DISPLAY SYNC
+   ==================================================================== */
+function updateOtkDisplays() {
+  // drag-source in editor
+  const roleEl = document.getElementById('src-otk-role');
+  const nameEl = document.getElementById('src-otk-name');
+  if (roleEl) roleEl.textContent = state.otkRole;
+  if (nameEl) nameEl.textContent = state.otkPerson;
+  // placed fields on PDF canvas
+  document.querySelectorAll('[data-otk-role]').forEach(el => { el.textContent = state.otkRole; });
+  document.querySelectorAll('[data-otk-name]').forEach(el => { el.textContent = state.otkPerson; });
+}
+
+/* ====================================================================
    EVENT BINDING
    ==================================================================== */
 function bindEvents() {
@@ -1677,8 +1746,8 @@ function bindEvents() {
   $('#apply-filter').addEventListener('click', applyProductFilter);
   $('#reset-filter').addEventListener('click', resetProductFilter);
 
-  $('#otk-role').addEventListener('change', e => { state.otkRole = e.target.value; });
-  $('#otk-person').addEventListener('change', e => { state.otkPerson = e.target.value; });
+  $('#otk-role').addEventListener('change', e => { state.otkRole = e.target.value; updateOtkDisplays(); });
+  $('#otk-person').addEventListener('change', e => { state.otkPerson = e.target.value; updateOtkDisplays(); });
 
   $('#btn-back').addEventListener('click', showMain);
   $('#btn-reset').addEventListener('click', resetTemplate);
