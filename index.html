@@ -1396,7 +1396,7 @@ async function printPdf() {
     templateName: tpl.name,
   });
 
-  toast('Формирование PDF…');
+  toast('Формирование PDF…', 30000);
   try {
     const pdfBytes = Uint8Array.from(atob(tpl.pdfBase64), c => c.charCodeAt(0));
     const dateText = formatRuDate(state.selectedDate);
@@ -1441,8 +1441,13 @@ async function printPdf() {
 
     const outBytes = await outDoc.save();
     const url = URL.createObjectURL(new Blob([outBytes], { type: 'application/pdf' }));
-    if (!window.open(url, '_blank')) toast('Браузер заблокировал окно');
-    else toast('PDF сформирован');
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `report_${new Date().toISOString().slice(0, 10)}.pdf`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    toast('PDF готов — скачивание началось');
     setTimeout(() => URL.revokeObjectURL(url), 60000);
   } catch (e) {
     console.error('printPdf failed', e);
