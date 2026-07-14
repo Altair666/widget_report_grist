@@ -10,7 +10,7 @@
 - **Репозиторий:** https://github.com/Altair666/widget_report_grist
 - **Live (GitHub Pages):** https://altair666.github.io/widget_report_grist/
 - **Целевой Grist-документ:** `db.mp-lab.ru`, организация `mp-lab`, документ **«LMP данные изделий»** (id `48G8NAEGKuLnpgBo36bWHM`). Уточнено 2026-06-19 через Grist API (read-only) — там же лежат `Report_template`/`Report_last_filter` (см. §5) и каталог изделий `Basic_platforms`/`Parts`/`Modifications`/`Orders`/`Products` (см. §6). Старое указание на `lmp-test-dec.getgrist.com/5GtDphApyrjG` было устаревшим/неверным — не использовать.
-- **Текущая версия:** `v0.26.0`
+- **Текущая версия:** `v0.27.0`
 - **Стек:** один `index.html` (HTML + CSS + vanilla JS), `pdf.js` с CDN, `grist-plugin-api.js` с CDN.
 
 ---
@@ -86,6 +86,14 @@ export GRIST_API_KEY="..."
 ## 3. История изменений
 
 **Порядок: новые записи добавляются сверху, сразу после этого заголовка — самая последняя версия должна быть первой, самая старая — последней.** (До 2026-06-19 список был перемешан: записи до v0.11.0 шли по возрастанию, после — по убыванию; восстановлено руками один раз, дальше поддерживается этим правилом.)
+
+### v0.27.0 — компактный UI главной + исправления печати PDF
+- controls-row уплотнён: padding/font-size уменьшены, OTK-блок с двумя select горизонтально.
+- Блок ОТК (должность + ФИО) объединён в один drag-тип `otk`; drag-источник показывает живой текст; placed-field тоже. Номер группы в блоке не отображается.
+- Кнопки фильтра «Сбросить/Применить» поменяны местами и прижаты к правому краю (`margin-left:auto`).
+- Шрифт Montserrat ограничен `#editor-view`; главная страница использует системный шрифт.
+- Загрузка шрифта: `montserrat-all-*-normal.woff2` не существовал на jsDelivr → заменён на `montserrat-cyrillic-{400,500}-normal.woff2` с цепочкой fallback и проверкой magic-bytes.
+- PDF: `window.open('…','_blank')` блокировался sandbox iframe Grist → заменён на `<a download>` programmatic click.
 
 ### v0.26.0 — шрифт Montserrat + блок ОТК
 - Шрифт для печати в PDF заменён с DejaVu Sans на **Montserrat** (загрузка через `@fontsource/montserrat@5` с jsDelivr, `montserrat-all-400-normal.woff2` / `montserrat-all-500-normal.woff2` — все субсеты, включая кириллицу и латиницу). Canvas FontFace также переведён на Montserrat (`MontserratStamp` вместо `DejaVuSansStamp`).
