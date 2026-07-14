@@ -10,7 +10,7 @@
 - **Репозиторий:** https://github.com/Altair666/widget_report_grist
 - **Live (GitHub Pages):** https://altair666.github.io/widget_report_grist/
 - **Целевой Grist-документ:** `db.mp-lab.ru`, организация `mp-lab`, документ **«LMP данные изделий»** (id `48G8NAEGKuLnpgBo36bWHM`). Уточнено 2026-06-19 через Grist API (read-only) — там же лежат `Report_template`/`Report_last_filter` (см. §5) и каталог изделий `Basic_platforms`/`Parts`/`Modifications`/`Orders`/`Products` (см. §6). Старое указание на `lmp-test-dec.getgrist.com/5GtDphApyrjG` было устаревшим/неверным — не использовать.
-- **Текущая версия:** `v0.30.0`
+- **Текущая версия:** `v0.31.0`
 - **Стек:** один `index.html` (HTML + CSS + vanilla JS), `pdf.js` с CDN, `grist-plugin-api.js` с CDN.
 
 ---
@@ -86,6 +86,11 @@ export GRIST_API_KEY="..."
 ## 3. История изменений
 
 **Порядок: новые записи добавляются сверху, сразу после этого заголовка — самая последняя версия должна быть первой, самая старая — последней.** (До 2026-06-19 список был перемешан: записи до v0.11.0 шли по возрастанию, после — по убыванию; восстановлено руками один раз, дальше поддерживается этим правилом.)
+
+### v0.31.0 — fix: шрифт в PDF (Montserrat) + center-based OTK alignment + размер редактора
+- Загрузка шрифтов: добавлена валидация magic-bytes (isValidFontBuf) — отвергает WOFF2 (Brotli, fontkit@1.1.1 зависает) и HTML-ошибки. Fallback для Medium теперь DejaVu **Bold** а не Regular (оба fallback не должны быть одинаковыми). Добавлен raw.githubusercontent.com как второй источник.
+- OTK PDF alignment переписан на тот же center-based подход что у других блоков: x = centerX ± textWidth/2, y = visualCenter ± (asc-desc)/2. Для поворота 180° блок переворачивается как единица через смену visualCenter у строк.
+- CSS: font-size OTK 9px→13px (≈ 9pt PDF при коэффициенте 1.4) — устраняет разницу между редактором и печатью. PDF otkSize = 9pt.
 
 ### v0.30.0 — fix: шрифт ОТК (9px, 400/500) + выравнивание при повороте + дата в drag source
 - CSS: добавлены комбинированные селекторы `.draggable-source .otk-field-role` + `.otk-field-content .otk-field-role` → перебивают font-weight:500 от родителей (был баг: drag source не имел обёртки .otk-field-content, потому предыдущий фикс не применялся). font-size: 9px для всех строк ОТК.
