@@ -10,7 +10,7 @@
 - **Репозиторий:** https://github.com/Altair666/widget_report_grist
 - **Live (GitHub Pages):** https://altair666.github.io/widget_report_grist/
 - **Целевой Grist-документ:** `db.mp-lab.ru`, организация `mp-lab`, документ **«LMP данные изделий»** (id `48G8NAEGKuLnpgBo36bWHM`). Уточнено 2026-06-19 через Grist API (read-only) — там же лежат `Report_template`/`Report_last_filter` (см. §5) и каталог изделий `Basic_platforms`/`Parts`/`Modifications`/`Orders`/`Products` (см. §6). Старое указание на `lmp-test-dec.getgrist.com/5GtDphApyrjG` было устаревшим/неверным — не использовать.
-- **Текущая версия:** `v0.27.0`
+- **Текущая версия:** `v0.28.0`
 - **Стек:** один `index.html` (HTML + CSS + vanilla JS), `pdf.js` с CDN, `grist-plugin-api.js` с CDN.
 
 ---
@@ -86,6 +86,11 @@ export GRIST_API_KEY="..."
 ## 3. История изменений
 
 **Порядок: новые записи добавляются сверху, сразу после этого заголовка — самая последняя версия должна быть первой, самая старая — последней.** (До 2026-06-19 список был перемешан: записи до v0.11.0 шли по возрастанию, после — по убыванию; восстановлено руками один раз, дальше поддерживается этим правилом.)
+
+### v0.28.0 — fix: PDF снова генерируется (TTF вместо WOFF2)
+- `@pdf-lib/fontkit@1.1.1` зависает на WOFF2 (brotli-декомпрессия не реализована) — Promise embedFont никогда не резолвился, тост «Формирование PDF…» висел вечно без ошибки.
+- Переключено на TTF: Montserrat Regular/Medium из Google Fonts GitHub через jsDelivr (`google/fonts@main/ofl/montserrat/static/`), DejaVu Sans TTF как гарантированный fallback.
+- Тост ошибки увеличен до 8 сек (было 2.2 сек) — теперь успевает прочитаться.
 
 ### v0.27.0 — компактный UI главной + исправления печати PDF
 - controls-row уплотнён: padding/font-size уменьшены, OTK-блок с двумя select горизонтально.
