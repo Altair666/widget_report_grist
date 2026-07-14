@@ -4,6 +4,9 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Widget Report — Grist</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500&display=swap" rel="stylesheet">
 <script src="https://docs.getgrist.com/grist-plugin-api.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
@@ -289,6 +292,23 @@
   .modal li.empty:hover { background: transparent; border-color: var(--border); }
   .modal-actions { display: flex; justify-content: flex-end; gap: 8px; }
 
+  /* ============== OTK block ============== */
+  #otk-block {
+    font-family: 'Montserrat', sans-serif;
+    min-width: 150px;
+    display: flex; flex-direction: column; justify-content: center; align-items: flex-start;
+  }
+  .otk-selects { display: flex; flex-direction: column; gap: 4px; width: 100%; }
+  .otk-selects select {
+    width: 100%; border: 1px solid var(--border); border-radius: 4px;
+    padding: 2px 6px; font-family: 'Montserrat', sans-serif; font-size: 13px;
+    background: white; color: #222;
+  }
+  .otk-selects #otk-person { font-weight: 500; }
+
+  .placed-field.type-otk_role { border-color: #9b59b6; background: #f3e8ff; color: #9b59b6; }
+  .placed-field.type-otk_name { border-color: #e67e22; background: #fff3e0; color: #e67e22; }
+
   .toast {
     position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
     background: #333; color: white; padding: 8px 16px; border-radius: 4px;
@@ -318,6 +338,20 @@
     <div class="ctl date-cell">
       <span id="date-display"></span>
       <input type="date" id="date-pick" />
+    </div>
+    <div class="ctl" id="otk-block">
+      <span class="ctl-label">ОТК</span>
+      <div class="otk-selects">
+        <select id="otk-role">
+          <option value="Начальник ОТК">Начальник ОТК</option>
+          <option value="И.о. начальника ОТК">И.о. начальника ОТК</option>
+        </select>
+        <select id="otk-person">
+          <option value="Л.Р. Боев" selected>Л.Р. Боев</option>
+          <option value="И.С. Дернов">И.С. Дернов</option>
+          <option value="А.В. Михеев">А.В. Михеев</option>
+        </select>
+      </div>
     </div>
     <div class="ctl select-cell ctl-btn" id="btn-select-tpl">
       <strong>Выбрать шаблон</strong>
@@ -377,6 +411,10 @@
           <span class="draggable-source" data-type="serial" draggable="true" style="background:#fdecec;border-color:var(--danger);color:var(--danger);">Серийный № <span class="badge" id="badge-serial" style="background:var(--danger)">1</span></span>
           <button class="rotate-btn" data-type="date" title="Повернуть поля «Дата» активной группы на 180°">↻</button>
           <span class="draggable-source" data-type="date" draggable="true" style="background:#e9f6ed;border-color:var(--ok);color:var(--ok);">Дата <span class="badge" id="badge-date" style="background:var(--ok)">1</span></span>
+          <button class="rotate-btn" data-type="otk_role" title="Повернуть поля «Должность ОТК» активной группы на 180°">↻</button>
+          <span class="draggable-source" data-type="otk_role" draggable="true" style="background:#f3e8ff;border-color:#9b59b6;color:#9b59b6;">Должн. ОТК <span class="badge" id="badge-otk_role" style="background:#9b59b6">1</span></span>
+          <button class="rotate-btn" data-type="otk_name" title="Повернуть поля «ФИО ОТК» активной группы на 180°">↻</button>
+          <span class="draggable-source" data-type="otk_name" draggable="true" style="background:#fff3e0;border-color:#e67e22;color:#e67e22;">ФИО ОТК <span class="badge" id="badge-otk_name" style="background:#e67e22">1</span></span>
         </div>
         <div class="group-row">
           <label>Активная группа</label>
@@ -418,7 +456,7 @@
 /* ====================================================================
    GLOBAL STATE
    ==================================================================== */
-const VERSION = 'v0.25.0';
+const VERSION = 'v0.26.0';
 
 // Grist table ids (service tables for templates / last-used filters).
 const TABLE_TEMPLATES = 'Report_template';
@@ -452,6 +490,8 @@ const state = {
   productFilter: { basicPlatform: '', part: '', modification: '', order: '', search: '' },
   selectedProductIds: new Set(),
   productsLoading: false,       // true while maybeLoadProducts() is in flight
+  otkPerson: 'Л.Р. Боев',
+  otkRole: 'Начальник ОТК',
 };
 
 /* PDF.js worker */
@@ -1167,13 +1207,21 @@ function exportCsv() {
 /* ====================================================================
    MAIN VIEW — PRINT PDF (apply template, "burn in" values via pdf-lib)
    ==================================================================== */
-let _cyrillicFontBytesPromise = null;
-function loadCyrillicFontBytes() {
-  if (!_cyrillicFontBytesPromise) {
-    _cyrillicFontBytesPromise = fetch('https://cdn.jsdelivr.net/npm/dejavu-fonts-ttf@2.37.3/ttf/DejaVuSans.ttf')
+let _montserratRegularBytesPromise = null;
+let _montserratMediumBytesPromise = null;
+function loadMontserratRegularBytes() {
+  if (!_montserratRegularBytesPromise) {
+    _montserratRegularBytesPromise = fetch('https://cdn.jsdelivr.net/npm/@fontsource/montserrat@5/files/montserrat-all-400-normal.woff2')
       .then(r => r.arrayBuffer());
   }
-  return _cyrillicFontBytesPromise;
+  return _montserratRegularBytesPromise;
+}
+function loadMontserratMediumBytes() {
+  if (!_montserratMediumBytesPromise) {
+    _montserratMediumBytesPromise = fetch('https://cdn.jsdelivr.net/npm/@fontsource/montserrat@5/files/montserrat-all-500-normal.woff2')
+      .then(r => r.arrayBuffer());
+  }
+  return _montserratMediumBytesPromise;
 }
 
 // pdf-lib's font.heightAtSize() reads the font's hhea ascent/descent, which
@@ -1183,37 +1231,39 @@ function loadCyrillicFontBytes() {
 // middle of the frame. Canvas TextMetrics' actualBoundingBox*/descent give
 // the real ink extents of the specific string being printed, which is what
 // vertical centering should use instead.
-let _cyrillicCanvasFontPromise = null;
-function loadCyrillicCanvasFont() {
-  if (!_cyrillicCanvasFontPromise) {
-    _cyrillicCanvasFontPromise = loadCyrillicFontBytes().then(async (bytes) => {
-      const face = new FontFace('DejaVuSansStamp', bytes);
+let _montserratCanvasFontPromise = null;
+function loadMontserratCanvasFont() {
+  if (!_montserratCanvasFontPromise) {
+    _montserratCanvasFontPromise = loadMontserratRegularBytes().then(async (bytes) => {
+      const face = new FontFace('MontserratStamp', bytes);
       await face.load();
       document.fonts.add(face);
       return face;
     });
   }
-  return _cyrillicCanvasFontPromise;
+  return _montserratCanvasFontPromise;
 }
 
 let _measureCtx = null;
 function measureInkExtents(value, size) {
   if (!_measureCtx) _measureCtx = document.createElement('canvas').getContext('2d');
-  _measureCtx.font = `${size}px DejaVuSansStamp`;
+  _measureCtx.font = `${size}px MontserratStamp`;
   const m = _measureCtx.measureText(value);
   if (m.actualBoundingBoxAscent === undefined) return null; // unsupported browser - caller falls back
   return { ascent: m.actualBoundingBoxAscent, descent: m.actualBoundingBoxDescent };
 }
 
 // Stamps one set of field values onto an already-loaded template PDFDocument
-// (in place). `values` = { date, config, serial } — plain text per field type.
-function stampTemplateFields(doc, font, fields, values) {
+// (in place). `values` = { date, config, serial, otk_role, otk_name } — plain text per field type.
+// fontMedium is used for otk_name; fontRegular for all other types.
+function stampTemplateFields(doc, fontRegular, fontMedium, fields, values) {
   const pages = doc.getPages();
   for (const f of fields) {
     const page = pages[f.page - 1];
     if (!page) continue;
     const value = values[f.type];
     if (!value) continue;
+    const font = (f.type === 'otk_name') ? fontMedium : fontRegular;
 
     const { width, height } = page.getSize();
     const size = 10;
@@ -1278,8 +1328,11 @@ async function printPdf() {
   try {
     const pdfBytes = Uint8Array.from(atob(tpl.pdfBase64), c => c.charCodeAt(0));
     const dateText = formatRuDate(state.selectedDate);
-    const fontBytes = await loadCyrillicFontBytes();
-    await loadCyrillicCanvasFont(); // needed by measureInkExtents() in stampTemplateFields()
+    const [fontRegularBytes, fontMediumBytes] = await Promise.all([
+      loadMontserratRegularBytes(),
+      loadMontserratMediumBytes(),
+    ]);
+    await loadMontserratCanvasFont(); // needed by measureInkExtents() in stampTemplateFields()
     const modMap = catalogMap(state.catalog.modifications);
 
     const outDoc = await PDFLib.PDFDocument.create();
@@ -1292,7 +1345,10 @@ async function printPdf() {
       const chunk = selectedProducts.slice(i, i + groupCount);
       const srcDoc = await PDFLib.PDFDocument.load(pdfBytes);
       srcDoc.registerFontkit(fontkit);
-      const font = await srcDoc.embedFont(fontBytes, { subset: true });
+      const [fontRegular, fontMedium] = await Promise.all([
+        srcDoc.embedFont(fontRegularBytes, { subset: true }),
+        srcDoc.embedFont(fontMediumBytes, { subset: true }),
+      ]);
 
       chunk.forEach((product, idx) => {
         const groupNum = idx + 1;
@@ -1300,9 +1356,11 @@ async function printPdf() {
           date: dateText,
           config: modMap.get(product.modeId)?.code || '',
           serial: product.productCode || '',
+          otk_role: state.otkRole,
+          otk_name: state.otkPerson,
         };
         const groupFields = tpl.fields.filter(f => f.group === groupNum);
-        stampTemplateFields(srcDoc, font, groupFields, values);
+        stampTemplateFields(srcDoc, fontRegular, fontMedium, groupFields, values);
       });
 
       const copiedPages = await outDoc.copyPages(srcDoc, srcDoc.getPageIndices());
@@ -1335,7 +1393,7 @@ function renderGroupTabs() {
   }
 }
 function updateBadges() {
-  ['config','serial','date'].forEach(t => {
+  ['config','serial','date','otk_role','otk_name'].forEach(t => {
     const el = document.getElementById(`badge-${t}`);
     if (el) el.textContent = state.activeGroup;
   });
@@ -1345,7 +1403,7 @@ function updateBadges() {
 // badge is greyed out and stops accepting new drags — only the placed
 // field on the PDF (bindPlacedFieldDrag) can be moved.
 function updateDragSources() {
-  ['config','serial','date'].forEach(type => {
+  ['config','serial','date','otk_role','otk_name'].forEach(type => {
     const src = document.querySelector(`.draggable-source[data-type="${type}"]`);
     if (!src) return;
     const placed = state.placedFields.some(f => f.type === type && f.group === state.activeGroup);
@@ -1537,7 +1595,7 @@ function redrawPlacedFields() {
     const el = document.createElement('div');
     el.className = `placed-field type-${f.type}`;
     el.dataset.id = f.id;
-    const labels = { config: 'Конфиг.', serial: 'Сер.№', date: 'Дата' };
+    const labels = { config: 'Конфиг.', serial: 'Сер.№', date: 'Дата', otk_role: 'Должн.ОТК', otk_name: 'ФИО ОТК' };
     el.innerHTML = `<span>G${f.group}: ${labels[f.type]}</span><span class="x" data-act="del">✕</span>`;
     el.style.left = (f.x * wrap.clientWidth) + 'px';
     el.style.top  = (f.y * wrap.clientHeight) + 'px';
@@ -1621,6 +1679,9 @@ function bindEvents() {
   });
   $('#apply-filter').addEventListener('click', applyProductFilter);
   $('#reset-filter').addEventListener('click', resetProductFilter);
+
+  $('#otk-role').addEventListener('change', e => { state.otkRole = e.target.value; });
+  $('#otk-person').addEventListener('change', e => { state.otkPerson = e.target.value; });
 
   $('#btn-back').addEventListener('click', showMain);
   $('#btn-reset').addEventListener('click', resetTemplate);
