@@ -311,11 +311,12 @@
   .otk-field-content {
     display: flex; flex-direction: column; align-items: flex-start; gap: 1px; flex: 1;
   }
-  .otk-field-role {
+  /* высокая специфичность: перебивает font-weight:500 от .placed-field и .draggable-source */
+  .otk-field-content .otk-field-role {
     font-family: 'Montserrat', sans-serif; font-size: 11px; font-weight: 400; line-height: 1.2;
     color: #555;
   }
-  .otk-field-name {
+  .otk-field-content .otk-field-name {
     font-family: 'Montserrat', sans-serif; font-size: 11px; font-weight: 500; line-height: 1.2;
     color: #222;
   }
@@ -474,7 +475,7 @@
 /* ====================================================================
    GLOBAL STATE
    ==================================================================== */
-const VERSION = 'v0.28.0';
+const VERSION = 'v0.29.0';
 
 // Grist table ids (service tables for templates / last-used filters).
 const TABLE_TEMPLATES = 'Report_template';
@@ -1337,8 +1338,9 @@ function stampTemplateFields(doc, fontRegular, fontMedium, fields, values) {
         drawName.rotate = PDFLib.degrees(180);
         const roleW = fontRegular.widthOfTextAtSize(roleText, size);
         const nameW = fontMedium.widthOfTextAtSize(nameText, size);
-        page.drawText(roleText, { x: xLeft + roleW, y: roleY + roleAsc + roleDesc, ...drawRole });
-        page.drawText(nameText, { x: xLeft + nameW, y: nameY + nameAsc, ...drawName });
+        // Swap Y positions so the whole block flips as a unit (not each line independently)
+        if (roleText) page.drawText(roleText, { x: xLeft + roleW, y: nameY + roleAsc + roleDesc, ...drawRole });
+        if (nameText) page.drawText(nameText, { x: xLeft + nameW, y: roleY + nameAsc,            ...drawName });
       } else {
         if (roleText) page.drawText(roleText, { x: xLeft, y: roleY, ...drawRole });
         if (nameText) page.drawText(nameText, { x: xLeft, y: nameY, ...drawName });
