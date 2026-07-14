@@ -71,37 +71,34 @@
   /* --- Controls row: date / template / actions, one row, equal height --- */
   #controls-row {
     display: flex;
-    gap: 8px;
+    gap: 6px;
     align-items: stretch;
   }
-  #controls-row > .ctl,
-  #controls-row > .ctl-btn {
-    flex: 1;
-    min-width: 0;
-  }
+  #controls-row > .ctl { flex: 0 0 auto; min-width: 0; }
+  #controls-row > .ctl-btn { flex: 1; min-width: 0; }
   .ctl {
     background: var(--panel);
     border: 1px solid var(--border);
     border-radius: var(--radius);
-    padding: 5px 10px;
+    padding: 4px 8px;
     display: flex; flex-direction: column; justify-content: center;
   }
-  .ctl-label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px; }
+  .ctl-label { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 3px; }
   .ctl-btn {
     background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius);
-    padding: 5px 10px; display: flex; flex-direction: column; align-items: center; justify-content: center;
-    gap: 2px; text-align: center; font-weight: 500;
+    padding: 3px 8px; display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 1px; text-align: center; font-weight: 500; font-size: 12px;
   }
   .ctl-btn:hover:not(:disabled) { background: #eceef0; border-color: var(--muted); color: #222; }
-  .ctl-btn .sub { font-size: 11px; color: var(--muted); font-weight: 400; }
+  .ctl-btn .sub { font-size: 10px; color: var(--muted); font-weight: 400; }
 
   #btn-print { background: #16b378; border-color: #16b378; color: white; }
   #btn-print .sub { color: rgba(255, 255, 255, 0.85); }
   #btn-print:hover:not(:disabled) { background: #008e58; border-color: #008e58; color: white; }
 
-  #date-display { font-size: 14px; font-weight: 600; }
-  #date-pick { margin-top: 3px; width: 100%; }
-  #tpl-selected { font-size: 13px; color: #222; font-weight: 400; }
+  #date-display { font-size: 12px; font-weight: 600; }
+  #date-pick { margin-top: 2px; width: 100%; font-size: 12px; }
+  #tpl-selected { font-size: 12px; color: #222; font-weight: 400; }
 
   /* --- Filter bar: full width, height synced to #controls-row via JS --- */
   #filter-bar {
@@ -295,16 +292,16 @@
   /* ============== OTK block ============== */
   #otk-block {
     font-family: 'Montserrat', sans-serif;
-    min-width: 150px;
     display: flex; flex-direction: column; justify-content: center; align-items: flex-start;
   }
-  .otk-selects { display: flex; flex-direction: column; gap: 4px; width: 100%; }
+  .otk-selects { display: flex; flex-direction: row; gap: 4px; align-items: center; }
   .otk-selects select {
-    width: 100%; border: 1px solid var(--border); border-radius: 4px;
-    padding: 2px 6px; font-family: 'Montserrat', sans-serif; font-size: 13px;
+    border: 1px solid var(--border); border-radius: 4px;
+    padding: 2px 4px; font-family: 'Montserrat', sans-serif; font-size: 11px;
     background: white; color: #222;
   }
-  .otk-selects #otk-person { font-weight: 500; }
+  .otk-selects #otk-role { flex: 0 0 auto; }
+  .otk-selects #otk-person { flex: 0 0 auto; font-weight: 500; }
 
   .placed-field.type-otk_role { border-color: #9b59b6; background: #f3e8ff; color: #9b59b6; }
   .placed-field.type-otk_name { border-color: #e67e22; background: #fff3e0; color: #e67e22; }
