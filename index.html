@@ -482,7 +482,7 @@
 /* ====================================================================
    GLOBAL STATE
    ==================================================================== */
-const VERSION = 'v0.31.0';
+const VERSION = 'v0.32.0';
 
 // Grist table ids (service tables for templates / last-used filters).
 const TABLE_TEMPLATES = 'Report_template';
@@ -1273,10 +1273,14 @@ async function fetchFontBuf(urls) {
   for (const url of urls) {
     try {
       const r = await fetch(url);
-      if (!r.ok) continue;
+      if (!r.ok) { console.warn('[font] HTTP', r.status, url); continue; }
       const buf = await r.arrayBuffer();
-      if (isValidFontBuf(buf)) return buf;
-    } catch { /* try next */ }
+      if (isValidFontBuf(buf)) {
+        console.log('[font] loaded', url.split('/').pop(), 'from', url);
+        return buf;
+      }
+      console.warn('[font] invalid magic bytes', url);
+    } catch(e) { console.warn('[font] fetch error', url, e.message); }
   }
   throw new Error('Не удалось загрузить шрифт ни с одного источника');
 }
@@ -1353,7 +1357,6 @@ function stampTemplateFields(doc, fontRegular, fontMedium, fields, values) {
       const nameText = values.otk_name || '';
       const otkSize = 9;
       const lineH   = otkSize * 1.35;
-      const centerX = leftX + frameW / 2;
 
       const roleW = fontRegular.widthOfTextAtSize(roleText, otkSize);
       const nameW = fontMedium.widthOfTextAtSize(nameText, otkSize);
@@ -1370,19 +1373,23 @@ function stampTemplateFields(doc, fontRegular, fontMedium, fields, values) {
       if (f.rotated) {
         drawRole.rotate = PDFLib.degrees(180);
         drawName.rotate = PDFLib.degrees(180);
+        // Right edge of frame: at 180° text goes left from anchor,
+        // so it appears right→left starting from xRight — visually left-aligned after flip.
         // Lines swap visual positions so block flips as a whole unit.
-        if (roleText) page.drawText(roleText, { x: centerX + roleW / 2, y: (centerY - lineH / 2) + (roleAsc - roleDesc) / 2, ...drawRole });
-        if (nameText) page.drawText(nameText, { x: centerX + nameW / 2, y: (centerY + lineH / 2) + (nameAsc - nameDesc) / 2, ...drawName });
+        const xRight = leftX + frameW - 2;
+        if (roleText) page.drawText(roleText, { x: xRight, y: (centerY - lineH / 2) + (roleAsc - roleDesc) / 2, ...drawRole });
+        if (nameText) page.drawText(nameText, { x: xRight, y: (centerY + lineH / 2) + (nameAsc - nameDesc) / 2, ...drawName });
       } else {
-        if (roleText) page.drawText(roleText, { x: centerX - roleW / 2, y: (centerY + lineH / 2) - (roleAsc - roleDesc) / 2, ...drawRole });
-        if (nameText) page.drawText(nameText, { x: centerX - nameW / 2, y: (centerY - lineH / 2) - (nameAsc - nameDesc) / 2, ...drawName });
+        const xLeft = leftX + 2;
+        if (roleText) page.drawText(roleText, { x: xLeft, y: (centerY + lineH / 2) - (roleAsc - roleDesc) / 2, ...drawRole });
+        if (nameText) page.drawText(nameText, { x: xLeft, y: (centerY - lineH / 2) - (nameAsc - nameDesc) / 2, ...drawName });
       }
       continue;
     }
 
     const value = values[f.type];
     if (!value) continue;
-    const font = fontRegular;
+    const font = fontMedium; // config / serial / date → Montserrat Medium
 
     const centerX = leftX + frameW / 2;
     const textWidth = font.widthOfTextAtSize(value, size);
