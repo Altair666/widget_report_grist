@@ -110,6 +110,7 @@
     border: 1px solid var(--border); border-radius: 4px; padding: 2px 6px;
   }
   #filter-bar .toolbar-btn { padding: 4px 10px; }
+  .filter-actions { margin-left: auto; display: flex; gap: 6px; }
 
   /* --- Bottom area: filter results --- */
   #filter-section {
@@ -395,8 +396,10 @@
     <label>Исполнение: <select id="mode-select"><option value="">— все —</option></select></label>
     <label>Заказ: <select id="order-select"><option value="">— все —</option></select></label>
     <label>Поиск: <input type="text" id="filter-search" placeholder="текст..." /></label>
-    <button class="toolbar-btn" id="apply-filter">Применить</button>
-    <button class="toolbar-btn" id="reset-filter">Сбросить</button>
+    <div class="filter-actions">
+      <button class="toolbar-btn" id="reset-filter">Сбросить</button>
+      <button class="toolbar-btn" id="apply-filter">Применить</button>
+    </div>
   </div>
 
   <div id="filter-section">
