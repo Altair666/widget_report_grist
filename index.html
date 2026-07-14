@@ -1225,20 +1225,44 @@ function exportCsv() {
 /* ====================================================================
    MAIN VIEW — PRINT PDF (apply template, "burn in" values via pdf-lib)
    ==================================================================== */
+// Tries each URL in order; returns ArrayBuffer of the first that succeeds.
+// Validates the response and the font magic bytes before returning so callers
+// get a clear error instead of "Invalid font data in ArrayBuffer".
+async function fetchFontBytes(urls) {
+  for (const url of urls) {
+    try {
+      const r = await fetch(url);
+      if (!r.ok) continue;
+      const buf = await r.arrayBuffer();
+      // Quick magic-byte check: valid font starts with 0x00010000 (TTF),
+      // 'OTTO' (OTF/CFF), 'wOFF' (WOFF), or 'wOF2' (WOFF2).
+      const magic = new Uint8Array(buf, 0, 4);
+      const tag = String.fromCharCode(magic[0], magic[1], magic[2], magic[3]);
+      if (magic[0] === 0 || tag === 'OTTO' || tag === 'wOFF' || tag === 'wOF2') return buf;
+    } catch { /* try next */ }
+  }
+  throw new Error('Не удалось загрузить шрифт Montserrat ни с одного источника');
+}
+
+const MONTSERRAT_400_URLS = [
+  'https://cdn.jsdelivr.net/npm/@fontsource/montserrat@5/files/montserrat-cyrillic-400-normal.woff2',
+  'https://cdn.jsdelivr.net/npm/@fontsource/montserrat@5/files/montserrat-latin-400-normal.woff2',
+  'https://cdn.jsdelivr.net/npm/dejavu-fonts-ttf@2.37.3/ttf/DejaVuSans.ttf',
+];
+const MONTSERRAT_500_URLS = [
+  'https://cdn.jsdelivr.net/npm/@fontsource/montserrat@5/files/montserrat-cyrillic-500-normal.woff2',
+  'https://cdn.jsdelivr.net/npm/@fontsource/montserrat@5/files/montserrat-latin-500-normal.woff2',
+  'https://cdn.jsdelivr.net/npm/dejavu-fonts-ttf@2.37.3/ttf/DejaVuSans.ttf',
+];
+
 let _montserratRegularBytesPromise = null;
 let _montserratMediumBytesPromise = null;
 function loadMontserratRegularBytes() {
-  if (!_montserratRegularBytesPromise) {
-    _montserratRegularBytesPromise = fetch('https://cdn.jsdelivr.net/npm/@fontsource/montserrat@5/files/montserrat-all-400-normal.woff2')
-      .then(r => r.arrayBuffer());
-  }
+  if (!_montserratRegularBytesPromise) _montserratRegularBytesPromise = fetchFontBytes(MONTSERRAT_400_URLS);
   return _montserratRegularBytesPromise;
 }
 function loadMontserratMediumBytes() {
-  if (!_montserratMediumBytesPromise) {
-    _montserratMediumBytesPromise = fetch('https://cdn.jsdelivr.net/npm/@fontsource/montserrat@5/files/montserrat-all-500-normal.woff2')
-      .then(r => r.arrayBuffer());
-  }
+  if (!_montserratMediumBytesPromise) _montserratMediumBytesPromise = fetchFontBytes(MONTSERRAT_500_URLS);
   return _montserratMediumBytesPromise;
 }
 
