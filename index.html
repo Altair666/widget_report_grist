@@ -311,15 +311,19 @@
   .otk-field-content {
     display: flex; flex-direction: column; align-items: flex-start; gap: 1px; flex: 1;
   }
-  /* высокая специфичность: перебивает font-weight:500 от .placed-field и .draggable-source */
+  /* Оба контекста: drag source (без обёртки) и placed-field (с .otk-field-content) */
+  .draggable-source .otk-field-role,
   .otk-field-content .otk-field-role {
-    font-family: 'Montserrat', sans-serif; font-size: 11px; font-weight: 400; line-height: 1.2;
+    font-family: 'Montserrat', sans-serif; font-size: 9px; font-weight: 400; line-height: 1.2;
     color: #555;
   }
+  .draggable-source .otk-field-name,
   .otk-field-content .otk-field-name {
-    font-family: 'Montserrat', sans-serif; font-size: 11px; font-weight: 500; line-height: 1.2;
+    font-family: 'Montserrat', sans-serif; font-size: 9px; font-weight: 500; line-height: 1.2;
     color: #222;
   }
+  .draggable-source[data-type="date"] { flex-direction: column; align-items: flex-start; gap: 1px; }
+  .src-date-text { font-size: 9px; font-weight: 400; color: #333; line-height: 1.2; }
   .draggable-source[data-type="otk"] {
     flex-direction: column; align-items: flex-start; gap: 1px; min-width: 120px;
   }
@@ -428,7 +432,10 @@
           <button class="rotate-btn" data-type="serial" title="Повернуть поля «Серийный №» активной группы на 180°">↻</button>
           <span class="draggable-source" data-type="serial" draggable="true" style="background:#fdecec;border-color:var(--danger);color:var(--danger);">Серийный № <span class="badge" id="badge-serial" style="background:var(--danger)">1</span></span>
           <button class="rotate-btn" data-type="date" title="Повернуть поля «Дата» активной группы на 180°">↻</button>
-          <span class="draggable-source" data-type="date" draggable="true" style="background:#e9f6ed;border-color:var(--ok);color:var(--ok);">Дата <span class="badge" id="badge-date" style="background:var(--ok)">1</span></span>
+          <span class="draggable-source" data-type="date" draggable="true" style="background:#e9f6ed;border-color:var(--ok);color:var(--ok);">
+            <span>Дата <span class="badge" id="badge-date" style="background:var(--ok)">1</span></span>
+            <span class="src-date-text" id="src-date-text"></span>
+          </span>
           <button class="rotate-btn" data-type="otk" title="Повернуть блок «ОТК» активной группы на 180°">↻</button>
           <span class="draggable-source" id="src-otk" data-type="otk" draggable="true" style="background:#f3e8ff;border-color:#9b59b6;">
             <span class="otk-field-role" id="src-otk-role">Начальник ОТК</span>
@@ -475,7 +482,7 @@
 /* ====================================================================
    GLOBAL STATE
    ==================================================================== */
-const VERSION = 'v0.29.0';
+const VERSION = 'v0.30.0';
 
 // Grist table ids (service tables for templates / last-used filters).
 const TABLE_TEMPLATES = 'Report_template';
@@ -750,13 +757,24 @@ function initDate() {
   state.selectedDate = today;
   $('#date-display').textContent = 'дата: ' + formatRuDate(today);
   $('#date-pick').value = today.toISOString().slice(0,10);
+  updateSrcDateText(today);
   $('#date-pick').addEventListener('change', e => {
     const d = new Date(e.target.value);
     if (!isNaN(d)) {
       state.selectedDate = d;
       $('#date-display').textContent = 'дата: ' + formatRuDate(d);
+      updateSrcDateText(d);
+      document.querySelectorAll('[data-placed-date]').forEach(el => {
+        const g = el.getAttribute('data-placed-date');
+        el.textContent = `G${g}: ${formatRuDate(d)}`;
+      });
     }
   });
+}
+
+function updateSrcDateText(d) {
+  const el = document.getElementById('src-date-text');
+  if (el) el.textContent = formatRuDate(d);
 }
 
 // #filter-bar is a separate grid row from #controls-row, so CSS alone can't
@@ -1336,11 +1354,12 @@ function stampTemplateFields(doc, fontRegular, fontMedium, fields, values) {
       if (f.rotated) {
         drawRole.rotate = PDFLib.degrees(180);
         drawName.rotate = PDFLib.degrees(180);
-        const roleW = fontRegular.widthOfTextAtSize(roleText, size);
-        const nameW = fontMedium.widthOfTextAtSize(nameText, size);
-        // Swap Y positions so the whole block flips as a unit (not each line independently)
-        if (roleText) page.drawText(roleText, { x: xLeft + roleW, y: nameY + roleAsc + roleDesc, ...drawRole });
-        if (nameText) page.drawText(nameText, { x: xLeft + nameW, y: roleY + nameAsc,            ...drawName });
+        // At 180° the left edge becomes the right edge visually →
+        // anchor at the right side of the frame so text appears left-aligned after flip.
+        const xRight = leftX + frameW - 2;
+        // Swap Y so the whole two-line block flips as a unit.
+        if (roleText) page.drawText(roleText, { x: xRight, y: nameY + roleAsc + roleDesc, ...drawRole });
+        if (nameText) page.drawText(nameText, { x: xRight, y: roleY + nameAsc,            ...drawName });
       } else {
         if (roleText) page.drawText(roleText, { x: xLeft, y: roleY, ...drawRole });
         if (nameText) page.drawText(nameText, { x: xLeft, y: nameY, ...drawName });
@@ -1673,6 +1692,9 @@ function redrawPlacedFields() {
         <span class="otk-field-role" data-otk-role>${escapeHtml(state.otkRole)}</span>
         <span class="otk-field-name" data-otk-name>${escapeHtml(state.otkPerson)}</span>
       </div><span class="x" data-act="del">✕</span>`;
+    } else if (f.type === 'date') {
+      const dateStr = state.selectedDate ? formatRuDate(state.selectedDate) : 'Дата';
+      el.innerHTML = `<span data-placed-date="${f.group}">G${f.group}: ${escapeHtml(dateStr)}</span><span class="x" data-act="del">✕</span>`;
     } else {
       el.innerHTML = `<span>G${f.group}: ${labels[f.type]}</span><span class="x" data-act="del">✕</span>`;
     }
