@@ -482,7 +482,7 @@
 /* ====================================================================
    GLOBAL STATE
    ==================================================================== */
-const VERSION = 'v0.34.0';
+const VERSION = 'v0.35.0';
 
 // Grist table ids (service tables for templates / last-used filters).
 const TABLE_TEMPLATES = 'Report_template';
@@ -1277,7 +1277,7 @@ async function fetchFontBuf(urls) {
       const buf = await r.arrayBuffer();
       if (isValidFontBuf(buf)) {
         console.log('[font] loaded', url.split('/').pop(), 'from', url);
-        return buf;
+        return { buf, url };
       }
       console.warn('[font] invalid magic bytes', url);
     } catch(e) { console.warn('[font] fetch error', url, e.message); }
@@ -1285,15 +1285,15 @@ async function fetchFontBuf(urls) {
   throw new Error('Не удалось загрузить шрифт ни с одного источника');
 }
 
-let _fontRegularBuf = null;
-let _fontMediumBuf  = null;
+let _fontRegularLoad = null;
+let _fontMediumLoad  = null;
 function loadFontRegularBytes() {
-  if (!_fontRegularBuf) _fontRegularBuf = fetchFontBuf(FONT_URLS_REGULAR);
-  return _fontRegularBuf;
+  if (!_fontRegularLoad) _fontRegularLoad = fetchFontBuf(FONT_URLS_REGULAR);
+  return _fontRegularLoad;
 }
 function loadFontMediumBytes() {
-  if (!_fontMediumBuf) _fontMediumBuf = fetchFontBuf(FONT_URLS_MEDIUM);
-  return _fontMediumBuf;
+  if (!_fontMediumLoad) _fontMediumLoad = fetchFontBuf(FONT_URLS_MEDIUM);
+  return _fontMediumLoad;
 }
 
 // pdf-lib's font.heightAtSize() reads the font's hhea ascent/descent, which
@@ -1306,7 +1306,7 @@ function loadFontMediumBytes() {
 let _canvasFontPromise = null;
 function loadCanvasFont() {
   if (!_canvasFontPromise) {
-    _canvasFontPromise = loadFontRegularBytes().then(async bytes => {
+    _canvasFontPromise = loadFontRegularBytes().then(async ({ buf: bytes }) => {
       const face = new FontFace('MontserratStamp', bytes);
       await face.load();
       document.fonts.add(face);
@@ -1348,15 +1348,19 @@ function stampTemplateFields(doc, fontRegular, fontMedium, fields, values) {
     const centerY = topY - frameH / 2;
 
     if (f.type === 'otk') {
-      // OTK is a two-line block — use its own measured height, not the single-line --field-h.
-      const otkFieldHpx = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--otk-field-h')) || fieldHpx * 1.8;
-      const otkFrameH  = otkFieldHpx / 1.4;
-      const otkCenterY = topY - otkFrameH / 2;
+      // All geometry derived directly from CSS constants — no DOM measurement needed.
+      // CSS: .placed-field pad=6px 10px; .otk-field-role/name font-size:13px line-height:1.2; gap:1px
+      // Screen→PDF scale = 1.4 (editor canvas px / PDF pt).
+      const SCALE       = 1.4;
+      const otkSize     = 9;                              // pt — user-specified font size
+      const padLeftPt   = 10 / SCALE;                    // 7.14pt left/right padding
+      const lineBoxPx   = 13 * 1.2;                      // 15.6px per line box in CSS
+      const otkFrameH   = (6 + lineBoxPx + 1 + lineBoxPx + 6) / SCALE; // 31.57pt total block height
+      const lineStepPt  = (lineBoxPx + 1) / SCALE;       // 11.86pt centre-to-centre between lines
+      const otkCenterY  = topY - otkFrameH / 2;
 
       const roleText = values.otk_role || '';
       const nameText = values.otk_name || '';
-      const otkSize = 9;
-      const lineH   = otkSize * 1.35;
 
       const roleInk  = measureInkExtents(roleText, otkSize);
       const nameInk  = measureInkExtents(nameText, otkSize);
@@ -1368,17 +1372,18 @@ function stampTemplateFields(doc, fontRegular, fontMedium, fields, values) {
       const drawRole = { size: otkSize, font: fontRegular, color: PDFLib.rgb(0, 0, 0) };
       const drawName = { size: otkSize, font: fontMedium,  color: PDFLib.rgb(0, 0, 0) };
 
-      // 10px CSS left padding → ~7pt (10/1.4). Rotated 180°: anchor is right edge, text goes leftward.
       if (f.rotated) {
+        // 180°: text baseline anchor moves to the RIGHT edge; glyph goes left.
+        // Lines swap positions so block flips as a whole unit.
         drawRole.rotate = PDFLib.degrees(180);
         drawName.rotate = PDFLib.degrees(180);
-        const xRight = leftX + frameW - 7;
-        if (roleText) page.drawText(roleText, { x: xRight, y: (otkCenterY - lineH / 2) + (roleAsc - roleDesc) / 2, ...drawRole });
-        if (nameText) page.drawText(nameText, { x: xRight, y: (otkCenterY + lineH / 2) + (nameAsc - nameDesc) / 2, ...drawName });
+        const xRight = leftX + frameW - padLeftPt;
+        if (roleText) page.drawText(roleText, { x: xRight, y: (otkCenterY - lineStepPt / 2) + (roleAsc - roleDesc) / 2, ...drawRole });
+        if (nameText) page.drawText(nameText, { x: xRight, y: (otkCenterY + lineStepPt / 2) + (nameAsc - nameDesc) / 2, ...drawName });
       } else {
-        const xLeft = leftX + 7;
-        if (roleText) page.drawText(roleText, { x: xLeft, y: (otkCenterY + lineH / 2) - (roleAsc - roleDesc) / 2, ...drawRole });
-        if (nameText) page.drawText(nameText, { x: xLeft, y: (otkCenterY - lineH / 2) - (nameAsc - nameDesc) / 2, ...drawName });
+        const xLeft = leftX + padLeftPt;
+        if (roleText) page.drawText(roleText, { x: xLeft, y: (otkCenterY + lineStepPt / 2) - (roleAsc - roleDesc) / 2, ...drawRole });
+        if (nameText) page.drawText(nameText, { x: xLeft, y: (otkCenterY - lineStepPt / 2) - (nameAsc - nameDesc) / 2, ...drawName });
       }
       continue;
     }
@@ -1430,11 +1435,21 @@ async function printPdf() {
   try {
     const pdfBytes = Uint8Array.from(atob(tpl.pdfBase64), c => c.charCodeAt(0));
     const dateText = formatRuDate(state.selectedDate);
-    const [fontRegularBytes, fontMediumBytes] = await Promise.all([
+    const [{ buf: fontRegularBytes, url: regUrl }, { buf: fontMediumBytes, url: medUrl }] = await Promise.all([
       loadFontRegularBytes(),
       loadFontMediumBytes(),
     ]);
     await loadCanvasFont(); // needed by measureInkExtents() in stampTemplateFields()
+
+    // Warn if Montserrat didn't load (fell back to DejaVu).
+    const isFallback = url => url && url.includes('dejavu');
+    if (isFallback(regUrl) || isFallback(medUrl)) {
+      const rn = isFallback(regUrl) ? 'DejaVu (фолбэк)' : 'Montserrat Regular';
+      const mn = isFallback(medUrl) ? 'DejaVu Bold (фолбэк)' : 'Montserrat Medium';
+      toast(`⚠ Шрифт: ${rn} / ${mn}`, 8000);
+    }
+    console.log('[font] regular:', regUrl);
+    console.log('[font] medium:',  medUrl);
     const modMap = catalogMap(state.catalog.modifications);
 
     const outDoc = await PDFLib.PDFDocument.create();
@@ -1449,7 +1464,7 @@ async function printPdf() {
       srcDoc.registerFontkit(fontkit);
       const [fontRegular, fontMedium] = await Promise.all([
         srcDoc.embedFont(fontRegularBytes, { subset: true }),
-        srcDoc.embedFont(fontMediumBytes, { subset: true }),
+        srcDoc.embedFont(fontMediumBytes,  { subset: true }),
       ]);
 
       chunk.forEach((product, idx) => {
@@ -1694,12 +1709,6 @@ function updateFieldWidth() {
   const rect = ref.getBoundingClientRect();
   if (rect.width  > 0) document.documentElement.style.setProperty('--field-w', rect.width  + 'px');
   if (rect.height > 0) document.documentElement.style.setProperty('--field-h', rect.height + 'px');
-  // OTK drag source is two-line → different height than single-line fields.
-  const otkRef = document.querySelector('.draggable-source[data-type="otk"]');
-  if (otkRef) {
-    const otkRect = otkRef.getBoundingClientRect();
-    if (otkRect.height > 0) document.documentElement.style.setProperty('--otk-field-h', otkRect.height + 'px');
-  }
 }
 
 function redrawPlacedFields() {
