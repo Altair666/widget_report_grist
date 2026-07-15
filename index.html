@@ -214,9 +214,9 @@
   /* Имя шаблона — поле ввода и кнопка «Загрузить PDF» в одну строку */
   #name-block { flex: 1; }
   .name-row { display: flex; gap: 8px; }
-  .font-size-block { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; width: 32px; height: 28px; box-sizing: border-box; }
-  .font-size-heading { font-size: 8px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.3px; white-space: nowrap; line-height: 1; }
-  .font-size-block input[type=number] { width: 28px; height: 16px; padding: 1px 2px; border: 1px solid var(--border); border-radius: 4px; font-size: 11px; text-align: center; box-sizing: border-box; }
+  .font-size-block { display: flex; flex-direction: column; align-items: center; gap: 3px; }
+  .font-size-heading { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; white-space: nowrap; line-height: 1; }
+  .font-size-block input[type=number] { width: 40px; height: 28px; padding: 2px 4px; border: 1px solid var(--border); border-radius: 4px; font-size: 13px; text-align: center; box-sizing: border-box; }
   #name-block #tpl-name {
     flex: 1; min-width: 0; padding: 6px 8px;
     border: 1px solid var(--border); border-radius: 4px;
@@ -449,7 +449,7 @@
               <span class="otk-field-name" id="src-otk-name">Л.Р. Боев</span>
             </span>
             <div class="font-size-block">
-              <span class="font-size-heading">Шрифт ОТК</span>
+              <span class="font-size-heading">Шрифт</span>
               <input type="number" id="otk-font-size" min="5" max="24" value="9" title="Размер шрифта для блока ОТК" />
             </div>
           </div>
@@ -498,7 +498,7 @@
 /* ====================================================================
    GLOBAL STATE
    ==================================================================== */
-const VERSION = 'v0.41.1';
+const VERSION = 'v0.41.2';
 
 // Grist table ids (service tables for templates / last-used filters).
 const TABLE_TEMPLATES = 'Report_template';
