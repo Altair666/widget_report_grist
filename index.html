@@ -168,7 +168,7 @@
   }
   /* Строка с drag-источниками и полем шрифта */
   .drag-row { display: flex; align-items: center; gap: 8px; justify-content: space-between; flex-wrap: wrap; }
-  .drag-items { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+  .drag-items { display: flex; align-items: flex-end; gap: 6px; flex-wrap: wrap; }
 
   .draggable-source {
     background: #eef3ff; border: 1px dashed var(--accent); border-radius: 4px;
@@ -498,7 +498,7 @@
 /* ====================================================================
    GLOBAL STATE
    ==================================================================== */
-const VERSION = 'v0.41.3';
+const VERSION = 'v0.41.4';
 
 // Grist table ids (service tables for templates / last-used filters).
 const TABLE_TEMPLATES = 'Report_template';
