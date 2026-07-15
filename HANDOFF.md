@@ -10,7 +10,7 @@
 - **Репозиторий:** https://github.com/Altair666/widget_report_grist
 - **Live (GitHub Pages):** https://altair666.github.io/widget_report_grist/
 - **Целевой Grist-документ:** `db.mp-lab.ru`, организация `mp-lab`, документ **«LMP данные изделий»** (id `48G8NAEGKuLnpgBo36bWHM`). Уточнено 2026-06-19 через Grist API (read-only) — там же лежат `Report_template`/`Report_last_filter` (см. §5) и каталог изделий `Basic_platforms`/`Parts`/`Modifications`/`Orders`/`Products` (см. §6). Старое указание на `lmp-test-dec.getgrist.com/5GtDphApyrjG` было устаревшим/неверным — не использовать.
-- **Текущая версия:** `v0.35.0`
+- **Текущая версия:** `v0.36.0`
 - **Стек:** один `index.html` (HTML + CSS + vanilla JS), `pdf.js` с CDN, `grist-plugin-api.js` с CDN.
 
 ---
@@ -86,6 +86,11 @@ export GRIST_API_KEY="..."
 ## 3. История изменений
 
 **Порядок: новые записи добавляются сверху, сразу после этого заголовка — самая последняя версия должна быть первой, самая старая — последней.** (До 2026-06-19 список был перемешан: записи до v0.11.0 шли по возрастанию, после — по убыванию; восстановлено руками один раз, дальше поддерживается этим правилом.)
+
+### v0.36.0 — feat: шрифты встроены в виджет; fix: одно PDF-окно
+- Montserrat Latin (U+0000-00FF) + Cyrillic (U+0400-04FF) WOFF base64 встроены прямо в HTML (4 файла × ~15-26KB, ~82KB итого). Нет зависимости от CDN, шрифты не «отваливаются».
+- `stampTemplateFields` принимает `fonts={regLat,regCyr,medLat,medCyr}`. Новые хелперы `textRuns/textWidthMixed/drawTextMixed` разбивают строки на Latin/Cyrillic прогоны — каждый рисуется правильным подмножеством.
+- fix(double-pdf): убран `<a>.click()` fallback. В Grist-sandbox `window.open` возвращал `undefined` → `!w === true` → оба пути открывали вкладку. Теперь только `window.open(url, '_blank')`.
 
 ### v0.35.0 — fix: OTK позиция и шрифт (производные из CSS-констант)
 - `stampTemplateFields` OTK-блок: вся геометрия теперь hardcoded из CSS (`pad=6px 10px`, `font-size=13px`, `line-height=1.2`, `gap=1px`) делённых на scale=1.4. Убрана зависимость от DOM-измерения `--otk-field-h` которое могло не успевать к моменту вызова.
