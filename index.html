@@ -163,11 +163,12 @@
 
   /* Конфигурация изделия — drag-источники сверху, активная группа / кол-во групп снизу */
   #config-block .config-inner {
-    display: flex; flex-direction: column; gap: 12px;
-    flex: 1; align-items: flex-start;
+    display: flex; flex-direction: column; gap: 8px;
+    flex: 1;
   }
-  /* Поворот+бейдж для конфигурации/серийного №/даты — коллинеарны в одну строку */
-  .drag-col { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+  /* Строка с drag-источниками и полем шрифта */
+  .drag-row { display: flex; align-items: center; gap: 8px; justify-content: space-between; flex-wrap: wrap; }
+  .drag-items { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 
   .draggable-source {
     background: #eef3ff; border: 1px dashed var(--accent); border-radius: 4px;
@@ -197,12 +198,10 @@
   .rotate-btn:hover { background: #f0f4ff; }
   .rotate-btn.active { background: var(--accent); color: white; border-color: var(--accent); }
 
-  /* Активная группа / Кол-во групп — подписи и значения коллинеарны */
-  .group-row {
-    display: grid; grid-template-columns: 1fr auto;
-    column-gap: 16px; row-gap: 6px; align-self: stretch;
-  }
-  .group-row > label {
+  /* Активная группа / Кол-во групп — правый край */
+  .group-row { display: flex; gap: 16px; align-items: flex-start; justify-content: flex-end; flex-wrap: wrap; }
+  .group-section { display: flex; flex-direction: column; gap: 4px; }
+  .group-section > label {
     font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px;
   }
   .group-tabs { display: flex; flex-wrap: wrap; gap: 4px; align-content: flex-start; }
@@ -215,8 +214,7 @@
   /* Имя шаблона — поле ввода и кнопка «Загрузить PDF» в одну строку */
   #name-block { flex: 1; }
   .name-row { display: flex; gap: 8px; }
-  .font-size-row { display: flex; align-items: center; gap: 8px; margin-top: 6px; flex-wrap: wrap; }
-  .font-size-label { display: flex; align-items: center; gap: 4px; font-size: 12px; }
+  .font-size-label { display: flex; align-items: center; gap: 4px; font-size: 12px; white-space: nowrap; }
   .font-size-label input[type=number] { width: 46px; padding: 2px 4px; border: 1px solid var(--border); border-radius: 4px; font-size: 12px; }
   #name-block #tpl-name {
     flex: 1; min-width: 0; padding: 6px 8px;
@@ -429,27 +427,39 @@
     <div class="field-block" id="config-block">
       <label>Конфигурация изделия</label>
       <div class="config-inner">
-        <div class="drag-col">
-          <button class="rotate-btn" data-type="config" title="Повернуть поля «Конфигурация» активной группы на 180°">↻</button>
-          <span class="draggable-source" data-type="config" draggable="true">Конфигурация <span class="badge" id="badge-config">1</span></span>
-          <button class="rotate-btn" data-type="serial" title="Повернуть поля «Серийный №» активной группы на 180°">↻</button>
-          <span class="draggable-source" data-type="serial" draggable="true" style="background:#fdecec;border-color:var(--danger);color:var(--danger);">Серийный № <span class="badge" id="badge-serial" style="background:var(--danger)">1</span></span>
-          <button class="rotate-btn" data-type="date" title="Повернуть поля «Дата» активной группы на 180°">↻</button>
-          <span class="draggable-source" data-type="date" draggable="true" style="background:#e9f6ed;border-color:var(--ok);color:var(--ok);">
-            <span>Дата <span class="badge" id="badge-date" style="background:var(--ok)">1</span></span>
-            <span class="src-date-text" id="src-date-text"></span>
-          </span>
-          <button class="rotate-btn" data-type="otk" title="Повернуть блок «ОТК» активной группы на 180°">↻</button>
-          <span class="draggable-source" id="src-otk" data-type="otk" draggable="true" style="background:#f3e8ff;border-color:#9b59b6;">
-            <span class="otk-field-role" id="src-otk-role">Начальник ОТК</span>
-            <span class="otk-field-name" id="src-otk-name">Л.Р. Боев</span>
-          </span>
+        <div class="drag-row">
+          <div class="drag-items">
+            <button class="rotate-btn" data-type="config" title="Повернуть поля «Конфигурация» активной группы на 180°">↻</button>
+            <span class="draggable-source" data-type="config" draggable="true">Конфигурация <span class="badge" id="badge-config">1</span></span>
+            <button class="rotate-btn" data-type="serial" title="Повернуть поля «Серийный №» активной группы на 180°">↻</button>
+            <span class="draggable-source" data-type="serial" draggable="true" style="background:#fdecec;border-color:var(--danger);color:var(--danger);">Серийный № <span class="badge" id="badge-serial" style="background:var(--danger)">1</span></span>
+            <button class="rotate-btn" data-type="date" title="Повернуть поля «Дата» активной группы на 180°">↻</button>
+            <span class="draggable-source" data-type="date" draggable="true" style="background:#e9f6ed;border-color:var(--ok);color:var(--ok);">
+              <span>Дата <span class="badge" id="badge-date" style="background:var(--ok)">1</span></span>
+              <span class="src-date-text" id="src-date-text"></span>
+            </span>
+          </div>
+          <label class="font-size-label">Шрифт <input type="number" id="field-font-size" min="5" max="24" value="10" title="Размер шрифта для конфигурации, серийного №, даты" /></label>
+        </div>
+        <div class="drag-row">
+          <div class="drag-items">
+            <button class="rotate-btn" data-type="otk" title="Повернуть блок «ОТК» активной группы на 180°">↻</button>
+            <span class="draggable-source" id="src-otk" data-type="otk" draggable="true" style="background:#f3e8ff;border-color:#9b59b6;">
+              <span class="otk-field-role" id="src-otk-role">Начальник ОТК</span>
+              <span class="otk-field-name" id="src-otk-name">Л.Р. Боев</span>
+            </span>
+          </div>
+          <label class="font-size-label">Шрифт ОТК <input type="number" id="otk-font-size" min="5" max="24" value="9" title="Размер шрифта для блока ОТК" /></label>
         </div>
         <div class="group-row">
-          <label>Активная группа</label>
-          <label for="count-input">Кол-во групп</label>
-          <div class="group-tabs" id="group-tabs"></div>
-          <input type="number" id="count-input" min="1" max="20" value="1" />
+          <div class="group-section">
+            <label>Активная группа</label>
+            <div class="group-tabs" id="group-tabs"></div>
+          </div>
+          <div class="group-section">
+            <label for="count-input">Кол-во групп</label>
+            <input type="number" id="count-input" min="1" max="20" value="1" />
+          </div>
         </div>
       </div>
     </div>
@@ -466,11 +476,6 @@
           <input type="text" id="tpl-name" placeholder="например: Бланк ОТК" />
           <button class="toolbar-btn" id="btn-load-pdf">Загрузить PDF</button>
           <input type="file" id="pdf-file" accept="application/pdf" hidden />
-        </div>
-        <div class="font-size-row">
-          <span class="ctl-label">Шрифт PDF (пт):</span>
-          <label class="font-size-label">Поля <input type="number" id="field-font-size" min="5" max="24" value="10" /></label>
-          <label class="font-size-label">ОТК <input type="number" id="otk-font-size" min="5" max="24" value="9" /></label>
         </div>
       </div>
     </div>
@@ -490,7 +495,7 @@
 /* ====================================================================
    GLOBAL STATE
    ==================================================================== */
-const VERSION = 'v0.39.0';
+const VERSION = 'v0.40.0';
 
 // Grist table ids (service tables for templates / last-used filters).
 const TABLE_TEMPLATES = 'Report_template';
