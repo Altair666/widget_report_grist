@@ -482,7 +482,7 @@
 /* ====================================================================
    GLOBAL STATE
    ==================================================================== */
-const VERSION = 'v0.36.0';
+const VERSION = 'v0.37.0';
 
 // Grist table ids (service tables for templates / last-used filters).
 const TABLE_TEMPLATES = 'Report_template';
@@ -1287,11 +1287,16 @@ function textWidthMixed(text, size, fLat, fCyr) {
   return textRuns(text).reduce((w, { text: seg, cyr }) =>
     w + (cyr ? fCyr : fLat).widthOfTextAtSize(seg, size), 0);
 }
-function drawTextMixed(page, text, x, y, size, fLat, fCyr, extra) {
+// reversed=true for 180° rotated text: pdf-lib anchors text at the start and
+// extends it LEFTWARD (−x direction). To keep segments in logical reading order
+// after the paper is turned, each subsequent segment must start further LEFT
+// (x decreases). For non-rotated text x increases as usual.
+function drawTextMixed(page, text, x, y, size, fLat, fCyr, extra, reversed) {
   for (const { text: seg, cyr } of textRuns(text)) {
     const font = cyr ? fCyr : fLat;
     page.drawText(seg, Object.assign({ x, y, size, font }, extra));
-    x += font.widthOfTextAtSize(seg, size);
+    const w = font.widthOfTextAtSize(seg, size);
+    x += reversed ? -w : w;
   }
 }
 
@@ -1370,13 +1375,13 @@ function stampTemplateFields(doc, fonts, fields, values) {
       if (f.rotated) {
         const xRight = leftX + frameW - padLeftPt;
         const rotOpt = { rotate: PDFLib.degrees(180), color: BLACK };
-        if (roleText) drawTextMixed(page, roleText, xRight, (otkCenterY - lineStepPt / 2) + (roleAsc - roleDesc) / 2, otkSize, regLat, regCyr, rotOpt);
-        if (nameText) drawTextMixed(page, nameText, xRight, (otkCenterY + lineStepPt / 2) + (nameAsc - nameDesc) / 2, otkSize, medLat, medCyr, rotOpt);
+        if (roleText) drawTextMixed(page, roleText, xRight, (otkCenterY - lineStepPt / 2) + (roleAsc - roleDesc) / 2, otkSize, regLat, regCyr, rotOpt, true);
+        if (nameText) drawTextMixed(page, nameText, xRight, (otkCenterY + lineStepPt / 2) + (nameAsc - nameDesc) / 2, otkSize, medLat, medCyr, rotOpt, true);
       } else {
         const xLeft = leftX + padLeftPt;
         const stdOpt = { color: BLACK };
-        if (roleText) drawTextMixed(page, roleText, xLeft, (otkCenterY + lineStepPt / 2) - (roleAsc - roleDesc) / 2, otkSize, regLat, regCyr, stdOpt);
-        if (nameText) drawTextMixed(page, nameText, xLeft, (otkCenterY - lineStepPt / 2) - (nameAsc - nameDesc) / 2, otkSize, medLat, medCyr, stdOpt);
+        if (roleText) drawTextMixed(page, roleText, xLeft, (otkCenterY + lineStepPt / 2) - (roleAsc - roleDesc) / 2, otkSize, regLat, regCyr, stdOpt, false);
+        if (nameText) drawTextMixed(page, nameText, xLeft, (otkCenterY - lineStepPt / 2) - (nameAsc - nameDesc) / 2, otkSize, medLat, medCyr, stdOpt, false);
       }
       continue;
     }
@@ -1395,7 +1400,7 @@ function stampTemplateFields(doc, fonts, fields, values) {
     const xDraw    = rotated ? centerX + tWidth / 2 : centerX - tWidth / 2;
     const yDraw    = rotated ? centerY + (ascent - descent) / 2 : centerY - (ascent - descent) / 2;
     const extra    = rotated ? { rotate: PDFLib.degrees(180), color: BLACK } : { color: BLACK };
-    drawTextMixed(page, value, xDraw, yDraw, size, medLat, medCyr, extra);
+    drawTextMixed(page, value, xDraw, yDraw, size, medLat, medCyr, extra, rotated);
   }
 }
 
