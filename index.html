@@ -215,6 +215,9 @@
   /* Имя шаблона — поле ввода и кнопка «Загрузить PDF» в одну строку */
   #name-block { flex: 1; }
   .name-row { display: flex; gap: 8px; }
+  .font-size-row { display: flex; align-items: center; gap: 8px; margin-top: 6px; flex-wrap: wrap; }
+  .font-size-label { display: flex; align-items: center; gap: 4px; font-size: 12px; }
+  .font-size-label input[type=number] { width: 46px; padding: 2px 4px; border: 1px solid var(--border); border-radius: 4px; font-size: 12px; }
   #name-block #tpl-name {
     flex: 1; min-width: 0; padding: 6px 8px;
     border: 1px solid var(--border); border-radius: 4px;
@@ -464,6 +467,11 @@
           <button class="toolbar-btn" id="btn-load-pdf">Загрузить PDF</button>
           <input type="file" id="pdf-file" accept="application/pdf" hidden />
         </div>
+        <div class="font-size-row">
+          <span class="ctl-label">Шрифт PDF (пт):</span>
+          <label class="font-size-label">Поля <input type="number" id="field-font-size" min="5" max="24" value="10" /></label>
+          <label class="font-size-label">ОТК <input type="number" id="otk-font-size" min="5" max="24" value="9" /></label>
+        </div>
       </div>
     </div>
   </div>
@@ -482,7 +490,7 @@
 /* ====================================================================
    GLOBAL STATE
    ==================================================================== */
-const VERSION = 'v0.38.0';
+const VERSION = 'v0.39.0';
 
 // Grist table ids (service tables for templates / last-used filters).
 const TABLE_TEMPLATES = 'Report_template';
@@ -584,19 +592,27 @@ async function refreshTemplates() {
   if (!state.gristFull) return;
   try {
     const data = await withTimeout(grist.docApi.fetchTable(TABLE_TEMPLATES));
-    state.templates = (data.id || []).map((rowId, i) => ({
-      _rowId: rowId,
-      id: data.ClientId[i] || ('id-' + rowId),
-      name: data.Name[i] || '',
-      groupCount: data.GroupCount[i] || 1,
-      fields: safeParseJson(data.Fields[i], []),
-      pdfBase64: data.PdfBase64[i] || null,
-      updatedAt: (data.UpdatedAt[i] || 0) * 1000,
-      updatedBy: data.UpdatedBy[i] || '',
-      // BasicPlatform column added in Grist manually (2026-06-19, see HANDOFF
-      // §6) - guard with `&&` in case an older doc doesn't have it yet.
-      basicPlatform: (data.BasicPlatform && data.BasicPlatform[i]) || null,
-    }));
+    state.templates = (data.id || []).map((rowId, i) => {
+      const fieldsRaw = safeParseJson(data.Fields[i], []);
+      const fields = Array.isArray(fieldsRaw) ? fieldsRaw : (fieldsRaw.fields || []);
+      const fieldFontSize = Array.isArray(fieldsRaw) ? 10 : (fieldsRaw.fieldFontSize || 10);
+      const otkFontSize   = Array.isArray(fieldsRaw) ? 9  : (fieldsRaw.otkFontSize   || 9);
+      return {
+        _rowId: rowId,
+        id: data.ClientId[i] || ('id-' + rowId),
+        name: data.Name[i] || '',
+        groupCount: data.GroupCount[i] || 1,
+        fields,
+        fieldFontSize,
+        otkFontSize,
+        pdfBase64: data.PdfBase64[i] || null,
+        updatedAt: (data.UpdatedAt[i] || 0) * 1000,
+        updatedBy: data.UpdatedBy[i] || '',
+        // BasicPlatform column added in Grist manually (2026-06-19, see HANDOFF
+        // §6) - guard with `&&` in case an older doc doesn't have it yet.
+        basicPlatform: (data.BasicPlatform && data.BasicPlatform[i]) || null,
+      };
+    });
   } catch (e) {
     console.error('Grist fetchTable(Templates) failed', e);
     toast('Не удалось загрузить шаблоны из Grist');
@@ -613,7 +629,7 @@ async function persistTemplate(tpl) {
       ClientId: tpl.id,
       Name: tpl.name,
       GroupCount: tpl.groupCount,
-      Fields: JSON.stringify(tpl.fields),
+      Fields: JSON.stringify({ fields: tpl.fields, fieldFontSize: tpl.fieldFontSize || 10, otkFontSize: tpl.otkFontSize || 9 }),
       PdfBase64: tpl.pdfBase64 || '',
       UpdatedAt: Math.floor(tpl.updatedAt / 1000),
       UpdatedBy: tpl.updatedBy || '',
@@ -718,10 +734,13 @@ function showEditor(existingTplId = null) {
       state.pdfBase64 = tpl.pdfBase64;
       $('#tpl-name').value = tpl.name;
       $('#count-input').value = tpl.groupCount;
+      $('#field-font-size').value = tpl.fieldFontSize || 10;
+      $('#otk-font-size').value = tpl.otkFontSize || 9;
     }
   } else {
     state.editingTemplate = {
       id: uuid(), name: '', fields: [], pdfBase64: null, groupCount: 1,
+      fieldFontSize: 10, otkFontSize: 9,
       // New templates inherit whichever "Базовое изделие" is picked in the
       // main filter right now; with none picked, the template stays
       // "universal" (visible regardless of the filter) - see templatesForCurrentFilter().
@@ -732,6 +751,8 @@ function showEditor(existingTplId = null) {
     state.pdfBase64 = null;
     $('#tpl-name').value = '';
     $('#count-input').value = 1;
+    $('#field-font-size').value = 10;
+    $('#otk-font-size').value = 9;
   }
 
   state.activeGroup = 1;
@@ -1336,7 +1357,7 @@ function stampTemplateFields(doc, fonts, fields, values) {
     if (!page) continue;
 
     const { width, height } = page.getSize();
-    const size = 10;
+    const size = values.fieldFontSize || 10;
 
     const fieldWpx = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--field-w')) || 90;
     const fieldHpx = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--field-h')) || 33;
@@ -1357,7 +1378,7 @@ function stampTemplateFields(doc, fonts, fields, values) {
       const otkFrameW   = f.w ? f.w * width  : frameW;
       const scale       = f.h ? CSS_OUTER_H / otkOuterH : 1.4;
 
-      const otkSize    = 9;
+      const otkSize    = values.otkFontSize || 9;
       const padLeftPt  = 10 / scale;
       const lineStepPt = (13 * 1.2 + 1) / scale;
       const otkCenterY = topY - otkOuterH / 2; // outer centre = inner centre (symmetric border)
@@ -1417,6 +1438,13 @@ async function printPdf() {
     label: `печать (${tpl.name}) × ${selectedProducts.length}`,
     author: state.filterAuthor,
     templateName: tpl.name,
+    batchValue: JSON.stringify({
+      basicPlatform: state.productFilter.basicPlatform || null,
+      part: state.productFilter.part || null,
+      modification: state.productFilter.modification || null,
+      order: state.productFilter.order || null,
+    }),
+    searchValue: state.productFilter.search || '',
   });
 
   toast('Формирование PDF…', 30000);
@@ -1453,6 +1481,8 @@ async function printPdf() {
           serial: product.productCode || '',
           otk_role: state.otkRole,
           otk_name: state.otkPerson,
+          fieldFontSize: tpl.fieldFontSize || 10,
+          otkFontSize: tpl.otkFontSize || 9,
         };
         const groupFields = tpl.fields.filter(f => f.group === groupNum);
         stampTemplateFields(srcDoc, fonts, groupFields, values);
@@ -1751,6 +1781,8 @@ async function saveTemplate() {
     name,
     groupCount: state.groupCount,
     fields: state.placedFields,
+    fieldFontSize: Math.max(5, Math.min(24, parseInt($('#field-font-size').value) || 10)),
+    otkFontSize:   Math.max(5, Math.min(24, parseInt($('#otk-font-size').value)   || 9)),
     pdfBase64: state.pdfBase64,
     updatedAt: Date.now(),
     updatedBy: state.filterAuthor,
@@ -1846,6 +1878,10 @@ async function initGrist() {
   if (window.grist) {
     grist.ready({ requiredAccess: 'full' });
     state.gristFull = true;
+    try {
+      const profile = await grist.getUserProfile();
+      if (profile && profile.name) state.filterAuthor = profile.name;
+    } catch {}
   }
 
   await refreshTemplates();
