@@ -214,8 +214,9 @@
   /* Имя шаблона — поле ввода и кнопка «Загрузить PDF» в одну строку */
   #name-block { flex: 1; }
   .name-row { display: flex; gap: 8px; }
-  .font-size-label { display: flex; align-items: center; gap: 4px; font-size: 12px; white-space: nowrap; }
-  .font-size-label input[type=number] { width: 46px; padding: 2px 4px; border: 1px solid var(--border); border-radius: 4px; font-size: 12px; }
+  .font-size-block { display: flex; flex-direction: column; align-items: center; gap: 2px; }
+  .font-size-heading { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; white-space: nowrap; }
+  .font-size-block input[type=number] { width: 46px; padding: 2px 4px; border: 1px solid var(--border); border-radius: 4px; font-size: 12px; text-align: center; }
   #name-block #tpl-name {
     flex: 1; min-width: 0; padding: 6px 8px;
     border: 1px solid var(--border); border-radius: 4px;
@@ -438,18 +439,20 @@
               <span>Дата <span class="badge" id="badge-date" style="background:var(--ok)">1</span></span>
               <span class="src-date-text" id="src-date-text"></span>
             </span>
-          </div>
-          <label class="font-size-label">Шрифт <input type="number" id="field-font-size" min="5" max="24" value="10" title="Размер шрифта для конфигурации, серийного №, даты" /></label>
-        </div>
-        <div class="drag-row">
-          <div class="drag-items">
+            <div class="font-size-block">
+              <span class="font-size-heading">Шрифт</span>
+              <input type="number" id="field-font-size" min="5" max="24" value="10" title="Размер шрифта для конфигурации, серийного №, даты" />
+            </div>
             <button class="rotate-btn" data-type="otk" title="Повернуть блок «ОТК» активной группы на 180°">↻</button>
             <span class="draggable-source" id="src-otk" data-type="otk" draggable="true" style="background:#f3e8ff;border-color:#9b59b6;">
               <span class="otk-field-role" id="src-otk-role">Начальник ОТК</span>
               <span class="otk-field-name" id="src-otk-name">Л.Р. Боев</span>
             </span>
+            <div class="font-size-block">
+              <span class="font-size-heading">Шрифт ОТК</span>
+              <input type="number" id="otk-font-size" min="5" max="24" value="9" title="Размер шрифта для блока ОТК" />
+            </div>
           </div>
-          <label class="font-size-label">Шрифт ОТК <input type="number" id="otk-font-size" min="5" max="24" value="9" title="Размер шрифта для блока ОТК" /></label>
         </div>
         <div class="group-row">
           <div class="group-section">
@@ -495,7 +498,7 @@
 /* ====================================================================
    GLOBAL STATE
    ==================================================================== */
-const VERSION = 'v0.40.0';
+const VERSION = 'v0.41.0';
 
 // Grist table ids (service tables for templates / last-used filters).
 const TABLE_TEMPLATES = 'Report_template';
@@ -529,6 +532,7 @@ const state = {
   productFilter: { basicPlatform: '', part: '', modification: '', order: '', search: '' },
   selectedProductIds: new Set(),
   productsLoading: false,       // true while maybeLoadProducts() is in flight
+  productsReady: false,         // true after a load attempt completed (success or error)
   otkPerson: 'Л.Р. Боев',
   otkRole: 'Начальник ОТК',
 };
@@ -1017,13 +1021,18 @@ function mapProductRow(row) {
 // obtained from inside the widget (grist.docApi.getAccessToken) - never a
 // long-lived key baked into this file, which ships to every Grist user who
 // opens the widget.
-async function loadProductsViaSql(basicPlatformId, partId) {
+async function loadProductsViaSql(basicPlatformId, { partId, modeId, orderId } = {}) {
   const tokenInfo = await withTimeout(grist.docApi.getAccessToken({ readOnly: true }));
-  const sql = `SELECT id, product_code, mode_name, "order", basic_platform, part FROM ${TABLE_PRODUCTS} WHERE basic_platform = ? AND part = ?`;
+  const conditions = ['basic_platform = ?'];
+  const args = [basicPlatformId];
+  if (partId) { conditions.push('part = ?'); args.push(partId); }
+  if (modeId) { conditions.push('mode_name = ?'); args.push(modeId); }
+  if (orderId) { conditions.push('"order" = ?'); args.push(orderId); }
+  const sql = `SELECT id, product_code, mode_name, "order", basic_platform, part FROM ${TABLE_PRODUCTS} WHERE ${conditions.join(' AND ')}`;
   const res = await withTimeout(fetch(`${tokenInfo.baseUrl}/sql?auth=${tokenInfo.token}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ sql, args: [basicPlatformId, partId] }),
+    body: JSON.stringify({ sql, args }),
   }));
   if (!res.ok) throw new Error(`SQL endpoint HTTP ${res.status}`);
   const data = await res.json();
@@ -1033,7 +1042,7 @@ async function loadProductsViaSql(basicPlatformId, partId) {
 // Fallback path: pull the whole table over the existing docApi RPC (no
 // token/network request involved) and filter client-side. Used only if the
 // SQL endpoint call above fails (older Grist version, disabled, network).
-async function loadProductsViaFetch(basicPlatformId, partId) {
+async function loadProductsViaFetch(basicPlatformId, { partId, modeId, orderId } = {}) {
   const data = await withTimeout(grist.docApi.fetchTable(TABLE_PRODUCTS));
   const rows = (data.id || []).map((id, i) => ({
     id,
@@ -1043,37 +1052,47 @@ async function loadProductsViaFetch(basicPlatformId, partId) {
     order: data.order[i],
     basic_platform: data.basic_platform[i],
   }));
-  return rows.filter(r => r.basic_platform === basicPlatformId && r.part === partId).map(mapProductRow);
+  return rows.filter(r => {
+    if (r.basic_platform !== basicPlatformId) return false;
+    if (partId && r.part !== partId) return false;
+    if (modeId && r.mode_name !== modeId) return false;
+    if (orderId && r.order !== orderId) return false;
+    return true;
+  }).map(mapProductRow);
 }
 
-async function loadProductsForFilter(basicPlatformId, partId) {
+async function loadProductsForFilter(basicPlatformId, filters) {
   try {
-    return await loadProductsViaSql(basicPlatformId, partId);
+    return await loadProductsViaSql(basicPlatformId, filters);
   } catch (e) {
     console.warn('Products via SQL failed, falling back to fetchTable', e);
-    return await loadProductsViaFetch(basicPlatformId, partId);
+    return await loadProductsViaFetch(basicPlatformId, filters);
   }
 }
 
-// Products only loads once both "Базовое изделие" and "Партия" are picked -
-// that pair is exactly what both loaders filter by - so the (potentially
-// huge) Products table is never pulled in full and the result list never
-// shows/loads everything with no filter.
+// Products load once "Базовое изделие" + at least one of "Партия/Исполнение/Заказ"
+// is picked. That way the (potentially huge) Products table is never pulled
+// in full, and the result list never shows everything with no filter.
 async function maybeLoadProducts() {
   const f = state.productFilter;
   state.selectedProductIds.clear(); // checked rows belong to the previously loaded set, now gone
-  if (!f.basicPlatform || !f.part) {
+  if (!f.basicPlatform || (!f.part && !f.modification && !f.order)) {
     state.catalog.products = [];
+    state.productsReady = false;
     return;
   }
   state.productsLoading = true;
+  state.productsReady = false;
   renderProductResults();
   try {
-    state.catalog.products = await loadProductsForFilter(f.basicPlatform, f.part);
+    const filters = { partId: f.part || null, modeId: f.modification || null, orderId: f.order || null };
+    state.catalog.products = await loadProductsForFilter(f.basicPlatform, filters);
+    state.productsReady = true;
   } catch (e) {
     console.error('Failed to load products (both SQL and fetch failed)', e);
     toast('Не удалось загрузить изделия из Grist');
     state.catalog.products = [];
+    state.productsReady = true;
   } finally {
     state.productsLoading = false;
   }
@@ -1120,11 +1139,6 @@ function fillFilterSelect(sel, items, currentValue) {
 
 // Базовое изделие/Партия come straight from the (always fully loaded, small)
 // lookup tables - Parts.basic_platform is a direct ref, no Products needed.
-// Исполнение/Заказ are derived from state.catalog.products, which is empty
-// until both of the above are picked (see maybeLoadProducts) - so those two
-// dropdowns naturally stay empty until then, with no special-casing here.
-// Always available - depends only on the small, eagerly-loaded lookup
-// tables (Parts.basic_platform is a direct ref, no Products needed).
 function renderBasicAndPartOptions() {
   const f = state.productFilter;
   if (!fillFilterSelect('#bp-select', sortByName(state.catalog.basicPlatforms), f.basicPlatform)) f.basicPlatform = '';
@@ -1134,12 +1148,25 @@ function renderBasicAndPartOptions() {
   if (!fillFilterSelect('#part-select', sortByName(partCandidates), f.part)) f.part = '';
 }
 
-// Depends on state.catalog.products, which is only populated once both of
-// the above are picked (see maybeLoadProducts) - call after that resolves.
+// Исполнение/Заказ: once products are loaded (state.productsReady), show only
+// items present in those products. When BP is picked but no products loaded
+// yet, show the full catalog so the user can pick a second filter to trigger
+// loading. Without BP: empty (nothing to filter by).
 function renderModeAndOrderOptions() {
   const f = state.productFilter;
-  if (!fillFilterSelect('#mode-select', uniqueCatalogItems(filteredProducts('modification'), 'modeId', state.catalog.modifications), f.modification)) f.modification = '';
-  if (!fillFilterSelect('#order-select', uniqueCatalogItems(filteredProducts('order'), 'orderId', state.catalog.orders), f.order)) f.order = '';
+  let modItems, ordItems;
+  if (state.productsReady) {
+    modItems = uniqueCatalogItems(filteredProducts('modification'), 'modeId', state.catalog.modifications);
+    ordItems = uniqueCatalogItems(filteredProducts('order'), 'orderId', state.catalog.orders);
+  } else if (f.basicPlatform) {
+    modItems = sortByName(state.catalog.modifications);
+    ordItems = sortByName(state.catalog.orders);
+  } else {
+    modItems = [];
+    ordItems = [];
+  }
+  if (!fillFilterSelect('#mode-select', modItems, f.modification)) f.modification = '';
+  if (!fillFilterSelect('#order-select', ordItems, f.order)) f.order = '';
 }
 
 function renderFilterOptions() {
@@ -1166,8 +1193,8 @@ function renderProductResults() {
     <th><label style="display:flex;align-items:center;gap:4px;font-weight:600;white-space:normal;cursor:pointer;"><input type="checkbox" id="select-all-rows"> Выделить все</label></th>
     <th>Базовое изделие</th><th>Партия</th><th>Исполнение</th><th>Заказ</th><th>Код изделия</th>
   </tr>`;
-  if (!state.productFilter.basicPlatform || !state.productFilter.part) {
-    t.querySelector('tbody').innerHTML = '<tr><td colspan="6"><span class="filter-empty">Выберите базовое изделие и партию, чтобы загрузить список изделий</span></td></tr>';
+  if (!state.productFilter.basicPlatform || (!state.productFilter.part && !state.productFilter.modification && !state.productFilter.order)) {
+    t.querySelector('tbody').innerHTML = '<tr><td colspan="6"><span class="filter-empty">Выберите базовое изделие и хотя бы ещё один фильтр (партия, исполнение или заказ)</span></td></tr>';
     return;
   }
   if (state.productsLoading) {
