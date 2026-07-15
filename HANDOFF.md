@@ -10,7 +10,7 @@
 - **Репозиторий:** https://github.com/Altair666/widget_report_grist
 - **Live (GitHub Pages):** https://altair666.github.io/widget_report_grist/
 - **Целевой Grist-документ:** `db.mp-lab.ru`, организация `mp-lab`, документ **«LMP данные изделий»** (id `48G8NAEGKuLnpgBo36bWHM`). Уточнено 2026-06-19 через Grist API (read-only) — там же лежат `Report_template`/`Report_last_filter` (см. §5) и каталог изделий `Basic_platforms`/`Parts`/`Modifications`/`Orders`/`Products` (см. §6). Старое указание на `lmp-test-dec.getgrist.com/5GtDphApyrjG` было устаревшим/неверным — не использовать.
-- **Текущая версия:** `v0.33.0`
+- **Текущая версия:** `v0.34.0`
 - **Стек:** один `index.html` (HTML + CSS + vanilla JS), `pdf.js` с CDN, `grist-plugin-api.js` с CDN.
 
 ---
@@ -86,6 +86,11 @@ export GRIST_API_KEY="..."
 ## 3. История изменений
 
 **Порядок: новые записи добавляются сверху, сразу после этого заголовка — самая последняя версия должна быть первой, самая старая — последней.** (До 2026-06-19 список был перемешан: записи до v0.11.0 шли по возрастанию, после — по убыванию; восстановлено руками один раз, дальше поддерживается этим правилом.)
+
+### v0.34.0 — fix: OTK-блок смещался вниз и вправо в PDF
+- `updateFieldWidth()` теперь также измеряет высоту OTK drag-source (`#src-otk`) и пишет в `--otk-field-h`.
+- `stampTemplateFields` OTK-ветка: `otkFrameH = otkFieldHpx / 1.4`, `otkCenterY = topY - otkFrameH / 2` — вместо `centerY` от однострочного поля (вертикальное смещение устранено).
+- Горизонтальное смещение: `xLeft = leftX + 7` (было +2), `xRight = leftX + frameW - 7` (было -2) — 10px CSS padding / 1.4 ≈ 7pt.
 
 ### v0.33.0 — fix: PDF открывается в браузере (не сохраняется)
 - `<a download>` заменён на `window.open(url, '_blank')` → PDF снова открывается в новой вкладке браузера. Если `window.open` заблокирован sandbox, fallback на `<a target="_blank">` без атрибута download.

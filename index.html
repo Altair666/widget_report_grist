@@ -482,7 +482,7 @@
 /* ====================================================================
    GLOBAL STATE
    ==================================================================== */
-const VERSION = 'v0.33.0';
+const VERSION = 'v0.34.0';
 
 // Grist table ids (service tables for templates / last-used filters).
 const TABLE_TEMPLATES = 'Report_template';
@@ -1348,18 +1348,16 @@ function stampTemplateFields(doc, fontRegular, fontMedium, fields, values) {
     const centerY = topY - frameH / 2;
 
     if (f.type === 'otk') {
-      // Two-line OTK block. Uses same center-based approach as single-line fields:
-      //   non-rotated: x = centerX - w/2,  y = visualCenter - (asc-desc)/2
-      //   rotated 180°: x = centerX + w/2, y = visualCenter + (asc-desc)/2
-      // Visual centers: role at (centerY + lineH/2), name at (centerY - lineH/2).
-      // On 180° flip the two lines swap visual positions so the block rotates as a unit.
+      // OTK is a two-line block — use its own measured height, not the single-line --field-h.
+      const otkFieldHpx = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--otk-field-h')) || fieldHpx * 1.8;
+      const otkFrameH  = otkFieldHpx / 1.4;
+      const otkCenterY = topY - otkFrameH / 2;
+
       const roleText = values.otk_role || '';
       const nameText = values.otk_name || '';
       const otkSize = 9;
       const lineH   = otkSize * 1.35;
 
-      const roleW = fontRegular.widthOfTextAtSize(roleText, otkSize);
-      const nameW = fontMedium.widthOfTextAtSize(nameText, otkSize);
       const roleInk  = measureInkExtents(roleText, otkSize);
       const nameInk  = measureInkExtents(nameText, otkSize);
       const roleAsc  = roleInk  ? roleInk.ascent  : otkSize * 0.75;
@@ -1370,19 +1368,17 @@ function stampTemplateFields(doc, fontRegular, fontMedium, fields, values) {
       const drawRole = { size: otkSize, font: fontRegular, color: PDFLib.rgb(0, 0, 0) };
       const drawName = { size: otkSize, font: fontMedium,  color: PDFLib.rgb(0, 0, 0) };
 
+      // 10px CSS left padding → ~7pt (10/1.4). Rotated 180°: anchor is right edge, text goes leftward.
       if (f.rotated) {
         drawRole.rotate = PDFLib.degrees(180);
         drawName.rotate = PDFLib.degrees(180);
-        // Right edge of frame: at 180° text goes left from anchor,
-        // so it appears right→left starting from xRight — visually left-aligned after flip.
-        // Lines swap visual positions so block flips as a whole unit.
-        const xRight = leftX + frameW - 2;
-        if (roleText) page.drawText(roleText, { x: xRight, y: (centerY - lineH / 2) + (roleAsc - roleDesc) / 2, ...drawRole });
-        if (nameText) page.drawText(nameText, { x: xRight, y: (centerY + lineH / 2) + (nameAsc - nameDesc) / 2, ...drawName });
+        const xRight = leftX + frameW - 7;
+        if (roleText) page.drawText(roleText, { x: xRight, y: (otkCenterY - lineH / 2) + (roleAsc - roleDesc) / 2, ...drawRole });
+        if (nameText) page.drawText(nameText, { x: xRight, y: (otkCenterY + lineH / 2) + (nameAsc - nameDesc) / 2, ...drawName });
       } else {
-        const xLeft = leftX + 2;
-        if (roleText) page.drawText(roleText, { x: xLeft, y: (centerY + lineH / 2) - (roleAsc - roleDesc) / 2, ...drawRole });
-        if (nameText) page.drawText(nameText, { x: xLeft, y: (centerY - lineH / 2) - (nameAsc - nameDesc) / 2, ...drawName });
+        const xLeft = leftX + 7;
+        if (roleText) page.drawText(roleText, { x: xLeft, y: (otkCenterY + lineH / 2) - (roleAsc - roleDesc) / 2, ...drawRole });
+        if (nameText) page.drawText(nameText, { x: xLeft, y: (otkCenterY - lineH / 2) - (nameAsc - nameDesc) / 2, ...drawName });
       }
       continue;
     }
@@ -1696,11 +1692,14 @@ function updateFieldWidth() {
   const ref = document.querySelector('.draggable-source[data-type="config"]');
   if (!ref) return;
   const rect = ref.getBoundingClientRect();
-  if (rect.width > 0) document.documentElement.style.setProperty('--field-w', rect.width + 'px');
-  // Printing centers text using --field-h too (see printPdf/stampTemplateFields) -
-  // .placed-field shares padding/font-size with this badge, so its real
-  // rendered height (not a guessed constant) is what the print frame should match.
+  if (rect.width  > 0) document.documentElement.style.setProperty('--field-w', rect.width  + 'px');
   if (rect.height > 0) document.documentElement.style.setProperty('--field-h', rect.height + 'px');
+  // OTK drag source is two-line → different height than single-line fields.
+  const otkRef = document.querySelector('.draggable-source[data-type="otk"]');
+  if (otkRef) {
+    const otkRect = otkRef.getBoundingClientRect();
+    if (otkRect.height > 0) document.documentElement.style.setProperty('--otk-field-h', otkRect.height + 'px');
+  }
 }
 
 function redrawPlacedFields() {
