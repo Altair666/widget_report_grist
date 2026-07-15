@@ -482,7 +482,7 @@
 /* ====================================================================
    GLOBAL STATE
    ==================================================================== */
-const VERSION = 'v0.37.0';
+const VERSION = 'v0.38.0';
 
 // Grist table ids (service tables for templates / last-used filters).
 const TABLE_TEMPLATES = 'Report_template';
@@ -1349,39 +1349,35 @@ function stampTemplateFields(doc, fonts, fields, values) {
     const BLACK = PDFLib.rgb(0, 0, 0);
 
     if (f.type === 'otk') {
-      // All geometry from CSS (.placed-field pad=6px 10px; font-size:13px; lh:1.2; gap:1px)
-      // Scale: 1.4 CSS px → 1 PDF pt.
-      const SCALE      = 1.4;
+      // OTK geometry derived from stored f.w / f.h (actual DOM dimensions as fractions of page).
+      // f.w and f.h are set by redrawPlacedFields() after render — they encode the real scale.
+      // CSS constants (border 1px, padding 6px 10px, font 13px/1.2, gap 1px):
+      const CSS_OUTER_H = 2 + 12 + 2 * 13 * 1.2 + 1; // border+pad+lines+gap = 46.2px
+      const otkOuterH   = f.h ? f.h * height : CSS_OUTER_H / 1.4;
+      const otkFrameW   = f.w ? f.w * width  : frameW;
+      const scale       = f.h ? CSS_OUTER_H / otkOuterH : 1.4;
+
       const otkSize    = 9;
-      const padLeftPt  = 10 / SCALE;
-      const lineBoxPx  = 13 * 1.2;
-      const otkFrameH  = (6 + lineBoxPx + 1 + lineBoxPx + 6) / SCALE;
-      const lineStepPt = (lineBoxPx + 1) / SCALE;
-      const otkCenterY = topY - otkFrameH / 2;
+      const padLeftPt  = 10 / scale;
+      const lineStepPt = (13 * 1.2 + 1) / scale;
+      const otkCenterY = topY - otkOuterH / 2; // outer centre = inner centre (symmetric border)
+
+      // Montserrat ink-centre correction (hhea: asc=968 desc=251 of 1000 units)
+      const INK_CORR = otkSize * (968 - 251) / 2000; // 3.227pt at 9pt
 
       const roleText = values.otk_role || '';
       const nameText = values.otk_name || '';
 
-      // Vertical centering uses canvas ink extents for the first character.
-      // For Cyrillic strings canvas falls back to system font — metrics are
-      // close enough; the fallback ratios are used in that case.
-      const roleInk = measureInkExtents(roleText, otkSize);
-      const nameInk = measureInkExtents(nameText, otkSize);
-      const roleAsc  = roleInk ? roleInk.ascent  : otkSize * 0.75;
-      const roleDesc = roleInk ? roleInk.descent : otkSize * 0.25;
-      const nameAsc  = nameInk ? nameInk.ascent  : otkSize * 0.75;
-      const nameDesc = nameInk ? nameInk.descent : otkSize * 0.25;
-
       if (f.rotated) {
-        const xRight = leftX + frameW - padLeftPt;
+        const xRight = leftX + otkFrameW - padLeftPt;
         const rotOpt = { rotate: PDFLib.degrees(180), color: BLACK };
-        if (roleText) drawTextMixed(page, roleText, xRight, (otkCenterY - lineStepPt / 2) + (roleAsc - roleDesc) / 2, otkSize, regLat, regCyr, rotOpt, true);
-        if (nameText) drawTextMixed(page, nameText, xRight, (otkCenterY + lineStepPt / 2) + (nameAsc - nameDesc) / 2, otkSize, medLat, medCyr, rotOpt, true);
+        if (roleText) drawTextMixed(page, roleText, xRight, (otkCenterY - lineStepPt / 2) + INK_CORR, otkSize, regLat, regCyr, rotOpt, true);
+        if (nameText) drawTextMixed(page, nameText, xRight, (otkCenterY + lineStepPt / 2) + INK_CORR, otkSize, medLat, medCyr, rotOpt, true);
       } else {
         const xLeft = leftX + padLeftPt;
         const stdOpt = { color: BLACK };
-        if (roleText) drawTextMixed(page, roleText, xLeft, (otkCenterY + lineStepPt / 2) - (roleAsc - roleDesc) / 2, otkSize, regLat, regCyr, stdOpt, false);
-        if (nameText) drawTextMixed(page, nameText, xLeft, (otkCenterY - lineStepPt / 2) - (nameAsc - nameDesc) / 2, otkSize, medLat, medCyr, stdOpt, false);
+        if (roleText) drawTextMixed(page, roleText, xLeft, (otkCenterY + lineStepPt / 2) - INK_CORR, otkSize, regLat, regCyr, stdOpt, false);
+        if (nameText) drawTextMixed(page, nameText, xLeft, (otkCenterY - lineStepPt / 2) - INK_CORR, otkSize, medLat, medCyr, stdOpt, false);
       }
       continue;
     }
@@ -1668,6 +1664,8 @@ function bindPlacedFieldDrag(el, f) {
       f.page = parseInt(wrap.dataset.page, 10);
       f.x = Math.max(0, Math.min(1, (elRect.left - wrapRect.left) / wrapRect.width));
       f.y = Math.max(0, Math.min(1, (elRect.top  - wrapRect.top)  / wrapRect.height));
+      if (wrapRect.width > 0)  f.w = elRect.width  / wrapRect.width;
+      if (wrapRect.height > 0) f.h = elRect.height / wrapRect.height;
       redrawPlacedFields();
     }
     el.addEventListener('pointermove', onMove);
@@ -1716,6 +1714,12 @@ function redrawPlacedFields() {
       redrawPlacedFields();
     });
     wrap.appendChild(el);
+    // Store actual rendered dimensions (fractions of page) for accurate PDF stamping.
+    // getBoundingClientRect forces layout; CSS custom properties are already applied.
+    const wR = wrap.getBoundingClientRect();
+    const eR = el.getBoundingClientRect();
+    if (wR.width  > 0) f.w = eR.width  / wR.width;
+    if (wR.height > 0) f.h = eR.height / wR.height;
   });
   updateRotateButtons();
   updateDragSources();
