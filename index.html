@@ -295,9 +295,6 @@
   .modal li.empty { font-style: italic; color: var(--muted); cursor: default; }
   .modal li.empty:hover { background: transparent; border-color: var(--border); }
   .modal-actions { display: flex; justify-content: flex-end; gap: 8px; }
-  .modal-actions-spread { justify-content: space-between; align-items: center; }
-  .modal-actions-right { display: flex; gap: 8px; }
-  .modal-bp-hint { font-size: 13px; font-weight: 400; color: var(--muted); }
 
   /* ============== OTK block (main view — system font) ============== */
   #otk-block {
@@ -504,7 +501,7 @@
 /* ====================================================================
    GLOBAL STATE
    ==================================================================== */
-const VERSION = 'v0.42.1';
+const VERSION = 'v0.42.2';
 
 // Grist table ids (service tables for templates / last-used filters).
 const TABLE_TEMPLATES = 'Report_template';
@@ -829,24 +826,15 @@ function syncFilterBarHeight() {
 function openTemplatePicker() {
   let selected = state.selectedTemplate;
 
-  const bpName = (() => {
-    const bp = state.productFilter.basicPlatform;
-    if (!bp) return null;
-    return state.catalog.basicPlatforms.find(b => b.id === bp)?.name || null;
-  })();
-
   const back = document.createElement('div');
   back.className = 'modal-back';
   back.innerHTML = `
     <div class="modal">
-      <h3>Выбрать шаблон${bpName ? ` <span class="modal-bp-hint">(${escapeHtml(bpName)})</span>` : ''}</h3>
+      <h3>Выбрать шаблон</h3>
       <ul id="tpl-list"></ul>
-      <div class="modal-actions modal-actions-spread">
-        <button class="toolbar-btn" data-act="new-tpl">+ Создать шаблон</button>
-        <div class="modal-actions-right">
-          <button class="toolbar-btn" data-act="cancel">Отмена</button>
-          <button class="toolbar-btn primary" data-act="ok">OK</button>
-        </div>
+      <div class="modal-actions">
+        <button class="toolbar-btn" data-act="cancel">Отмена</button>
+        <button class="toolbar-btn primary" data-act="ok">OK</button>
       </div>
     </div>`;
   document.body.appendChild(back);
@@ -887,10 +875,6 @@ function openTemplatePicker() {
     renderTemplateButtons();
     back.remove();
   };
-  back.querySelector('[data-act=new-tpl]').onclick = () => {
-    back.remove();
-    showEditor(null);
-  };
   back.addEventListener('click', e => { if (e.target === back) back.remove(); });
 }
 
@@ -923,7 +907,12 @@ function escapeHtml(s) {
 function renderTemplateButtons() {
   const templates = getTemplates();
   const tpl = templates.find(t => t.id === state.selectedTemplate);
-  $('#tpl-selected').textContent = tpl ? tpl.name : 'не выбран';
+  const hasBp = !!state.productFilter.basicPlatform;
+
+  $('#btn-select-tpl').disabled = !hasBp;
+  $('#btn-create-tpl').disabled = !hasBp;
+
+  $('#tpl-selected').textContent = tpl ? tpl.name : (hasBp ? 'не выбран' : 'выберите базовое изделие');
   $('#btn-edit-tpl').disabled = !tpl;
   $('#btn-edit-tpl').querySelector('.sub').textContent = tpl ? 'изменить ' + tpl.name : 'выберите шаблон';
   $('#btn-print').disabled = !tpl;
@@ -1235,14 +1224,7 @@ async function onProductFilterChange(field, rawValue) {
   await maybeLoadProducts();
   renderModeAndOrderOptions();
   renderProductResults();
-
-  // When the base platform is picked, open the template picker if the
-  // currently selected template doesn't match the new platform.
-  if (field === 'basicPlatform' && rawValue) {
-    const cur = getTemplates().find(t => t.id === state.selectedTemplate);
-    const mismatch = !cur || (cur.basicPlatform && cur.basicPlatform !== state.productFilter.basicPlatform);
-    if (mismatch) openTemplatePicker();
-  }
+  renderTemplateButtons();
 }
 
 function renderProductResults() {
