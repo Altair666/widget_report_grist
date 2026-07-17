@@ -10,7 +10,7 @@
 - **Репозиторий:** https://github.com/Altair666/widget_report_grist
 - **Live (GitHub Pages):** https://altair666.github.io/widget_report_grist/
 - **Целевой Grist-документ:** `db.mp-lab.ru`, организация `mp-lab`, документ **«LMP данные изделий»** (id `48G8NAEGKuLnpgBo36bWHM`). Уточнено 2026-06-19 через Grist API (read-only) — там же лежат `Report_template`/`Report_last_filter` (см. §5) и каталог изделий `Basic_platforms`/`Parts`/`Modifications`/`Orders`/`Products` (см. §6). Старое указание на `lmp-test-dec.getgrist.com/5GtDphApyrjG` было устаревшим/неверным — не использовать.
-- **Текущая версия:** `v0.42.2`
+- **Текущая версия:** `v0.42.3`
 - **Стек:** один `index.html` (HTML + CSS + vanilla JS), `pdf.js` с CDN, `grist-plugin-api.js` с CDN.
 
 ---
@@ -86,6 +86,14 @@ export GRIST_API_KEY="..."
 ## 3. История изменений
 
 **Порядок: новые записи добавляются сверху, сразу после этого заголовка — самая последняя версия должна быть первой, самая старая — последней.** (До 2026-06-19 список был перемешан: записи до v0.11.0 шли по возрастанию, после — по убыванию; восстановлено руками один раз, дальше поддерживается этим правилом.)
+
+### v0.42.3 — fix: btn-select-tpl → button (disabled работает); строгий фильтр шаблонов
+
+- btn-select-tpl: div → button, теперь disabled реально блокирует клик
+- templatesForCurrentFilter: строгая фильтрация — только шаблоны с совпадающим
+  basicPlatform; без БИ список пуст (пикер и так недоступен)
+- onProductFilterChange(basicPlatform): если выбранный шаблон принадлежит другому
+  БИ — сбрасывается автоматически
 
 ### v0.42.2 — fix: revert 0.42.1; кнопки шаблонов заблокированы без БИ
 

@@ -378,10 +378,10 @@
         </select>
       </div>
     </div>
-    <div class="ctl select-cell ctl-btn" id="btn-select-tpl">
+    <button class="ctl-btn" id="btn-select-tpl" disabled>
       <strong>Выбрать шаблон</strong>
-      <span id="tpl-selected" class="sub">не выбран</span>
-    </div>
+      <span id="tpl-selected" class="sub">выберите базовое изделие</span>
+    </button>
     <button class="ctl-btn" id="btn-create-tpl">
       <strong>Создать шаблон</strong>
       <span class="sub">новый</span>
@@ -501,7 +501,7 @@
 /* ====================================================================
    GLOBAL STATE
    ==================================================================== */
-const VERSION = 'v0.42.2';
+const VERSION = 'v0.42.3';
 
 // Grist table ids (service tables for templates / last-used filters).
 const TABLE_TEMPLATES = 'Report_template';
@@ -591,13 +591,12 @@ function withTimeout(promise, ms = 20000) {
 
 function getTemplates() { return state.templates; }
 
-// Templates with no BasicPlatform are "universal" - always shown. Templates
-// tied to a specific platform only show once that platform is picked in the
-// main filter; with no platform picked, nothing is restricted.
+// Only templates tied to the currently selected basicPlatform are shown.
+// Without a platform picked the list is empty (the picker is disabled anyway).
 function templatesForCurrentFilter() {
   const bp = state.productFilter.basicPlatform;
-  if (!bp) return state.templates;
-  return state.templates.filter(t => !t.basicPlatform || t.basicPlatform === bp);
+  if (!bp) return [];
+  return state.templates.filter(t => t.basicPlatform === bp);
 }
 
 async function refreshTemplates() {
@@ -1220,6 +1219,13 @@ function renderFilterOptions() {
 
 async function onProductFilterChange(field, rawValue) {
   state.productFilter[field] = rawValue ? Number(rawValue) : '';
+  if (field === 'basicPlatform') {
+    // Deselect template if it belongs to a different (or no) platform.
+    const cur = getTemplates().find(t => t.id === state.selectedTemplate);
+    if (!cur || cur.basicPlatform !== state.productFilter.basicPlatform) {
+      state.selectedTemplate = null;
+    }
+  }
   renderBasicAndPartOptions();
   await maybeLoadProducts();
   renderModeAndOrderOptions();
