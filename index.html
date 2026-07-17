@@ -501,7 +501,7 @@
 /* ====================================================================
    GLOBAL STATE
    ==================================================================== */
-const VERSION = 'v0.42.3';
+const VERSION = 'v0.42.4';
 
 // Grist table ids (service tables for templates / last-used filters).
 const TABLE_TEMPLATES = 'Report_template';
@@ -536,6 +536,7 @@ const state = {
   selectedProductIds: new Set(),
   productsLoading: false,       // true while maybeLoadProducts() is in flight
   productsReady: false,         // true after a load attempt completed (success or error)
+  bpOptions: { modeIds: new Set(), orderIds: new Set() }, // distinct mode/order IDs for selected BP
   otkPerson: 'Л.Р. Боев',
   otkRole: 'Начальник ОТК',
 };
@@ -962,6 +963,7 @@ async function reapplyLastFilter(idx) {
   };
   $('#filter-search').value = state.productFilter.search;
   renderBasicAndPartOptions();
+  await loadBpOptions(state.productFilter.basicPlatform);
   await maybeLoadProducts();
   renderModeAndOrderOptions();
   renderProductResults();
@@ -1113,6 +1115,40 @@ async function loadProductsForFilter(basicPlatformId, filters) {
   }
 }
 
+// Loads distinct modification / order IDs available for a given basic platform.
+// Used to pre-filter the Исполнение / Заказ dropdowns before a full product load.
+async function loadBpOptions(basicPlatformId) {
+  state.bpOptions = { modeIds: new Set(), orderIds: new Set() };
+  if (!basicPlatformId || !state.gristFull) return;
+  try {
+    const tokenInfo = await withTimeout(grist.docApi.getAccessToken({ readOnly: true }), 5000);
+    const sql = `SELECT DISTINCT mode_name, "order" FROM ${TABLE_PRODUCTS} WHERE basic_platform = ?`;
+    const res = await withTimeout(fetch(`${tokenInfo.baseUrl}/sql?auth=${tokenInfo.token}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sql, args: [basicPlatformId] }),
+    }), 10000);
+    if (!res.ok) throw new Error(`SQL ${res.status}`);
+    const data = await res.json();
+    for (const r of (data.records || [])) {
+      if (r.fields.mode_name) state.bpOptions.modeIds.add(r.fields.mode_name);
+      if (r.fields.order)     state.bpOptions.orderIds.add(r.fields.order);
+    }
+  } catch (e) {
+    console.warn('loadBpOptions SQL failed, dropdowns will show full catalog', e);
+    // Fallback: populate from full fetchTable if already loaded
+    try {
+      const data = await withTimeout(grist.docApi.fetchTable(TABLE_PRODUCTS), 10000);
+      (data.id || []).forEach((_, i) => {
+        if (data.basic_platform[i] === basicPlatformId) {
+          if (data.mode_name[i]) state.bpOptions.modeIds.add(data.mode_name[i]);
+          if (data.order[i])     state.bpOptions.orderIds.add(data.order[i]);
+        }
+      });
+    } catch {}
+  }
+}
+
 // Products load once "Базовое изделие" + at least one of "Партия/Исполнение/Заказ"
 // is picked. That way the (potentially huge) Products table is never pulled
 // in full, and the result list never shows everything with no filter.
@@ -1192,9 +1228,9 @@ function renderBasicAndPartOptions() {
 }
 
 // Исполнение/Заказ: once products are loaded (state.productsReady), show only
-// items present in those products. When BP is picked but no products loaded
-// yet, show the full catalog so the user can pick a second filter to trigger
-// loading. Without BP: empty (nothing to filter by).
+// items present in those products. When BP is picked but products not loaded
+// yet, filter by the distinct IDs from state.bpOptions (loaded via lightweight
+// SQL when BP was selected). Without BP: empty.
 function renderModeAndOrderOptions() {
   const f = state.productFilter;
   let modItems, ordItems;
@@ -1202,8 +1238,13 @@ function renderModeAndOrderOptions() {
     modItems = uniqueCatalogItems(filteredProducts('modification'), 'modeId', state.catalog.modifications);
     ordItems = uniqueCatalogItems(filteredProducts('order'), 'orderId', state.catalog.orders);
   } else if (f.basicPlatform) {
-    modItems = sortByName(state.catalog.modifications);
-    ordItems = sortByName(state.catalog.orders);
+    const { modeIds, orderIds } = state.bpOptions;
+    modItems = modeIds.size > 0
+      ? sortByName(state.catalog.modifications.filter(m => modeIds.has(m.id)))
+      : sortByName(state.catalog.modifications);
+    ordItems = orderIds.size > 0
+      ? sortByName(state.catalog.orders.filter(o => orderIds.has(o.id)))
+      : sortByName(state.catalog.orders);
   } else {
     modItems = [];
     ordItems = [];
@@ -1220,11 +1261,11 @@ function renderFilterOptions() {
 async function onProductFilterChange(field, rawValue) {
   state.productFilter[field] = rawValue ? Number(rawValue) : '';
   if (field === 'basicPlatform') {
-    // Deselect template if it belongs to a different (or no) platform.
     const cur = getTemplates().find(t => t.id === state.selectedTemplate);
     if (!cur || cur.basicPlatform !== state.productFilter.basicPlatform) {
       state.selectedTemplate = null;
     }
+    await loadBpOptions(state.productFilter.basicPlatform);
   }
   renderBasicAndPartOptions();
   await maybeLoadProducts();

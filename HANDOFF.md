@@ -10,7 +10,7 @@
 - **Репозиторий:** https://github.com/Altair666/widget_report_grist
 - **Live (GitHub Pages):** https://altair666.github.io/widget_report_grist/
 - **Целевой Grist-документ:** `db.mp-lab.ru`, организация `mp-lab`, документ **«LMP данные изделий»** (id `48G8NAEGKuLnpgBo36bWHM`). Уточнено 2026-06-19 через Grist API (read-only) — там же лежат `Report_template`/`Report_last_filter` (см. §5) и каталог изделий `Basic_platforms`/`Parts`/`Modifications`/`Orders`/`Products` (см. §6). Старое указание на `lmp-test-dec.getgrist.com/5GtDphApyrjG` было устаревшим/неверным — не использовать.
-- **Текущая версия:** `v0.42.3`
+- **Текущая версия:** `v0.42.4`
 - **Стек:** один `index.html` (HTML + CSS + vanilla JS), `pdf.js` с CDN, `grist-plugin-api.js` с CDN.
 
 ---
@@ -86,6 +86,15 @@ export GRIST_API_KEY="..."
 ## 3. История изменений
 
 **Порядок: новые записи добавляются сверху, сразу после этого заголовка — самая последняя версия должна быть первой, самая старая — последней.** (До 2026-06-19 список был перемешан: записи до v0.11.0 шли по возрастанию, после — по убыванию; восстановлено руками один раз, дальше поддерживается этим правилом.)
+
+### v0.42.4 — feat: фильтр заказов/исполнений по БИ через SQL DISTINCT
+
+- `loadBpOptions(bp)`: при выборе БИ запускает `SELECT DISTINCT mode_name, "order"
+  FROM Products WHERE basic_platform = ?` — лёгкий SQL без загрузки всей таблицы
+- `state.bpOptions`: хранит Set modeIds + Set orderIds для текущего БИ
+- `renderModeAndOrderOptions`: когда БИ выбрано но продукты ещё не загружены —
+  показывает только исполнения/заказы из bpOptions (ранее — весь каталог)
+- Вызывается также в reapplyLastFilter при восстановлении фильтра из чипа
 
 ### v0.42.3 — fix: btn-select-tpl → button (disabled работает); строгий фильтр шаблонов
 
