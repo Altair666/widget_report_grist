@@ -501,7 +501,7 @@
 /* ====================================================================
    GLOBAL STATE
    ==================================================================== */
-const VERSION = 'v0.42.4';
+const VERSION = 'v0.43.0';
 
 // Grist table ids (service tables for templates / last-used filters).
 const TABLE_TEMPLATES = 'Report_template';
@@ -1072,7 +1072,8 @@ async function loadProductsViaSql(basicPlatformId, { partId, modeId, orderId } =
   const args = [basicPlatformId];
   if (partId) { conditions.push('part = ?'); args.push(partId); }
   if (modeId) { conditions.push('mode_name = ?'); args.push(modeId); }
-  if (orderId) { conditions.push('"order" = ?'); args.push(orderId); }
+  if (orderId === '__none__') { conditions.push('("order" = 0 OR "order" IS NULL)'); }
+  else if (orderId) { conditions.push('"order" = ?'); args.push(orderId); }
   const sql = `SELECT id, product_code, mode_name, "order", basic_platform, part FROM ${TABLE_PRODUCTS} WHERE ${conditions.join(' AND ')}`;
   const res = await withTimeout(fetch(`${tokenInfo.baseUrl}/sql?auth=${tokenInfo.token}`, {
     method: 'POST',
@@ -1101,7 +1102,8 @@ async function loadProductsViaFetch(basicPlatformId, { partId, modeId, orderId }
     if (r.basic_platform !== basicPlatformId) return false;
     if (partId && r.part !== partId) return false;
     if (modeId && r.mode_name !== modeId) return false;
-    if (orderId && r.order !== orderId) return false;
+    if (orderId === '__none__') { if (r.order && r.order !== 0) return false; }
+    else if (orderId && r.order !== orderId) return false;
     return true;
   }).map(mapProductRow);
 }
@@ -1118,7 +1120,7 @@ async function loadProductsForFilter(basicPlatformId, filters) {
 // Loads distinct modification / order IDs available for a given basic platform.
 // Used to pre-filter the Исполнение / Заказ dropdowns before a full product load.
 async function loadBpOptions(basicPlatformId) {
-  state.bpOptions = { modeIds: new Set(), orderIds: new Set() };
+  state.bpOptions = { modeIds: new Set(), orderIds: new Set(), hasNoOrder: false };
   if (!basicPlatformId || !state.gristFull) return;
   try {
     const tokenInfo = await withTimeout(grist.docApi.getAccessToken({ readOnly: true }), 5000);
@@ -1133,6 +1135,7 @@ async function loadBpOptions(basicPlatformId) {
     for (const r of (data.records || [])) {
       if (r.fields.mode_name) state.bpOptions.modeIds.add(r.fields.mode_name);
       if (r.fields.order)     state.bpOptions.orderIds.add(r.fields.order);
+      else                    state.bpOptions.hasNoOrder = true;
     }
   } catch (e) {
     console.warn('loadBpOptions SQL failed, dropdowns will show full catalog', e);
@@ -1143,6 +1146,7 @@ async function loadBpOptions(basicPlatformId) {
         if (data.basic_platform[i] === basicPlatformId) {
           if (data.mode_name[i]) state.bpOptions.modeIds.add(data.mode_name[i]);
           if (data.order[i])     state.bpOptions.orderIds.add(data.order[i]);
+          else                   state.bpOptions.hasNoOrder = true;
         }
       });
     } catch {}
@@ -1179,14 +1183,17 @@ async function maybeLoadProducts() {
 
 // Products matching the current filter, optionally ignoring one field (so a
 // dropdown can list options including the one already selected in itself).
-function filteredProducts(excludeField) {
+function filteredProducts(excludeField, { noSearch = false } = {}) {
   const f = state.productFilter;
   let list = state.catalog.products;
   if (f.basicPlatform && excludeField !== 'basicPlatform') list = list.filter(p => p.basicPlatformId === f.basicPlatform);
   if (f.part && excludeField !== 'part') list = list.filter(p => p.partId === f.part);
   if (f.modification && excludeField !== 'modification') list = list.filter(p => p.modeId === f.modification);
-  if (f.order && excludeField !== 'order') list = list.filter(p => p.orderId === f.order);
-  if (f.search) {
+  if (f.order && excludeField !== 'order') {
+    if (f.order === '__none__') list = list.filter(p => !p.orderId);
+    else list = list.filter(p => p.orderId === f.order);
+  }
+  if (f.search && !noSearch) {
     const s = f.search.toLowerCase();
     const bpMap = catalogMap(state.catalog.basicPlatforms), partMap = catalogMap(state.catalog.parts),
           modMap = catalogMap(state.catalog.modifications), ordMap = catalogMap(state.catalog.orders);
@@ -1233,24 +1240,39 @@ function renderBasicAndPartOptions() {
 // SQL when BP was selected). Without BP: empty.
 function renderModeAndOrderOptions() {
   const f = state.productFilter;
-  let modItems, ordItems;
+  let modItems, ordItems, showNoneOrder = false;
   if (state.productsReady) {
-    modItems = uniqueCatalogItems(filteredProducts('modification'), 'modeId', state.catalog.modifications);
-    ordItems = uniqueCatalogItems(filteredProducts('order'), 'orderId', state.catalog.orders);
+    modItems = uniqueCatalogItems(filteredProducts('modification', { noSearch: true }), 'modeId', state.catalog.modifications);
+    ordItems = uniqueCatalogItems(filteredProducts('order', { noSearch: true }), 'orderId', state.catalog.orders);
+    showNoneOrder = filteredProducts('order', { noSearch: true }).some(p => !p.orderId);
   } else if (f.basicPlatform) {
-    const { modeIds, orderIds } = state.bpOptions;
+    const { modeIds, orderIds, hasNoOrder } = state.bpOptions;
     modItems = modeIds.size > 0
       ? sortByName(state.catalog.modifications.filter(m => modeIds.has(m.id)))
       : sortByName(state.catalog.modifications);
     ordItems = orderIds.size > 0
       ? sortByName(state.catalog.orders.filter(o => orderIds.has(o.id)))
       : sortByName(state.catalog.orders);
+    showNoneOrder = !!hasNoOrder;
   } else {
     modItems = [];
     ordItems = [];
   }
   if (!fillFilterSelect('#mode-select', modItems, f.modification)) f.modification = '';
-  if (!fillFilterSelect('#order-select', ordItems, f.order)) f.order = '';
+
+  // Order select: fill normal items, then optionally inject "— нет —" for products without an order
+  const isNone = f.order === '__none__';
+  const orderKept = fillFilterSelect('#order-select', ordItems, isNone ? '' : f.order);
+  const orderEl = $('#order-select');
+  if (showNoneOrder) {
+    const noneOpt = document.createElement('option');
+    noneOpt.value = '__none__';
+    noneOpt.textContent = '— нет —';
+    orderEl.insertBefore(noneOpt, orderEl.options[1] || null);
+    if (isNone) orderEl.value = '__none__';
+  }
+  if (!isNone && !orderKept) f.order = '';
+  if (isNone && !showNoneOrder) f.order = '';
 }
 
 function renderFilterOptions() {
@@ -1259,7 +1281,7 @@ function renderFilterOptions() {
 }
 
 async function onProductFilterChange(field, rawValue) {
-  state.productFilter[field] = rawValue ? Number(rawValue) : '';
+  state.productFilter[field] = (field === 'order' && rawValue === '__none__') ? '__none__' : (rawValue ? Number(rawValue) : '');
   if (field === 'basicPlatform') {
     const cur = getTemplates().find(t => t.id === state.selectedTemplate);
     if (!cur || cur.basicPlatform !== state.productFilter.basicPlatform) {
@@ -1346,7 +1368,7 @@ function applyProductFilter() {
   if (f.basicPlatform) parts.push(`база: ${bpMap.get(f.basicPlatform)?.name || f.basicPlatform}`);
   if (f.part) parts.push(`партия: ${partMap.get(f.part)?.name || f.part}`);
   if (f.modification) parts.push(`исполнение: ${modMap.get(f.modification)?.name || f.modification}`);
-  if (f.order) parts.push(`заказ: ${ordMap.get(f.order)?.name || f.order}`);
+  if (f.order) parts.push(f.order === '__none__' ? 'заказ: нет' : `заказ: ${ordMap.get(f.order)?.name || f.order}`);
   if (f.search) parts.push(`поиск: ${f.search}`);
   if (!parts.length) { toast('Фильтр не задан'); return; }
   pushLastFilter({
@@ -1970,7 +1992,6 @@ function bindEvents() {
   $('#order-select').addEventListener('change', e => onProductFilterChange('order', e.target.value));
   $('#filter-search').addEventListener('input', e => {
     state.productFilter.search = e.target.value.trim();
-    renderFilterOptions();
     renderProductResults();
   });
   $('#apply-filter').addEventListener('click', applyProductFilter);

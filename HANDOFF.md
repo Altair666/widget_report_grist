@@ -10,7 +10,7 @@
 - **Репозиторий:** https://github.com/Altair666/widget_report_grist
 - **Live (GitHub Pages):** https://altair666.github.io/widget_report_grist/
 - **Целевой Grist-документ:** `db.mp-lab.ru`, организация `mp-lab`, документ **«LMP данные изделий»** (id `48G8NAEGKuLnpgBo36bWHM`). Уточнено 2026-06-19 через Grist API (read-only) — там же лежат `Report_template`/`Report_last_filter` (см. §5) и каталог изделий `Basic_platforms`/`Parts`/`Modifications`/`Orders`/`Products` (см. §6). Старое указание на `lmp-test-dec.getgrist.com/5GtDphApyrjG` было устаревшим/неверным — не использовать.
-- **Текущая версия:** `v0.42.4`
+- **Текущая версия:** `v0.43.0`
 - **Стек:** один `index.html` (HTML + CSS + vanilla JS), `pdf.js` с CDN, `grist-plugin-api.js` с CDN.
 
 ---
@@ -86,6 +86,23 @@ export GRIST_API_KEY="..."
 ## 3. История изменений
 
 **Порядок: новые записи добавляются сверху, сразу после этого заголовка — самая последняя версия должна быть первой, самая старая — последней.** (До 2026-06-19 список был перемешан: записи до v0.11.0 шли по возрастанию, после — по убыванию; восстановлено руками один раз, дальше поддерживается этим правилом.)
+
+### v0.43.0 — feat: «нет» в фильтре заказа + fix: поиск не сбрасывает дропдауны
+
+- Фильтр заказа: опция «— нет —» (value `__none__`) для изделий без заказа
+  - `loadBpOptions`: трекинг `hasNoOrder` (есть ли записи без order в SQL DISTINCT)
+  - `renderModeAndOrderOptions`: добавляет option «— нет —» после «— все —» если
+    `showNoneOrder` (из loaded products или bpOptions.hasNoOrder)
+  - `filteredProducts`: `f.order === '__none__'` → `!p.orderId`
+  - `loadProductsViaSql`: `orderId === '__none__'` → `WHERE ("order" = 0 OR "order" IS NULL)`
+  - `loadProductsViaFetch`: `orderId === '__none__'` → `r.order && r.order !== 0`
+  - `applyProductFilter`: метка «заказ: нет» для `'__none__'`
+  - `onProductFilterChange`: `'__none__'` не конвертируется в число
+- Fix поиск: обработчик `#filter-search` больше НЕ вызывает `renderFilterOptions()`
+  (вызов сбрасывал выбранные значения дропдаунов через `fillFilterSelect`).
+  Теперь только `renderProductResults()` — дропдауны стабильны при вводе поиска.
+- `filteredProducts` получил параметр `{ noSearch: true }`: дропдауны Исполнение/Заказ
+  рассчитываются без учёта search-фильтра, чтобы не схлопываться при наборе текста
 
 ### v0.42.4 — feat: фильтр заказов/исполнений по БИ через SQL DISTINCT
 
