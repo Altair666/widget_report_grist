@@ -501,7 +501,7 @@
 /* ====================================================================
    GLOBAL STATE
    ==================================================================== */
-const VERSION = 'v0.41.5';
+const VERSION = 'v0.42.0';
 
 // Grist table ids (service tables for templates / last-used filters).
 const TABLE_TEMPLATES = 'Report_template';
@@ -947,6 +947,8 @@ async function reapplyLastFilter(idx) {
   if (!entry) return;
   let snap = {};
   try { snap = JSON.parse(entry.batchValue || '{}'); } catch { /* older entry without a snapshot */ }
+
+  // Product filter
   state.productFilter = {
     basicPlatform: snap.basicPlatform || '',
     part: snap.part || '',
@@ -959,6 +961,40 @@ async function reapplyLastFilter(idx) {
   await maybeLoadProducts();
   renderModeAndOrderOptions();
   renderProductResults();
+
+  // Date
+  if (snap.date) {
+    const d = new Date(snap.date);
+    if (!isNaN(d)) {
+      state.selectedDate = d;
+      $('#date-display').textContent = 'дата: ' + formatRuDate(d);
+      $('#date-pick').value = snap.date;
+      updateSrcDateText(d);
+      document.querySelectorAll('[data-placed-date]').forEach(el => {
+        el.textContent = `G${el.getAttribute('data-placed-date')}: ${formatRuDate(d)}`;
+      });
+    }
+  }
+
+  // OTK
+  if (snap.otkRole) {
+    state.otkRole = snap.otkRole;
+    const el = $('#otk-role');
+    if (el) el.value = snap.otkRole;
+  }
+  if (snap.otkPerson) {
+    state.otkPerson = snap.otkPerson;
+    const el = $('#otk-person');
+    if (el) el.value = snap.otkPerson;
+  }
+  if (snap.otkRole || snap.otkPerson) updateOtkDisplays();
+
+  // Template
+  if (snap.templateId && getTemplates().some(t => t.id === snap.templateId)) {
+    state.selectedTemplate = snap.templateId;
+    renderTemplateButtons();
+  }
+
   toast('Фильтр применён');
 }
 
@@ -1263,7 +1299,17 @@ function applyProductFilter() {
   pushLastFilter({
     label: parts.join(', '),
     author: state.filterAuthor,
-    batchValue: JSON.stringify({ basicPlatform: f.basicPlatform || null, part: f.part || null, modification: f.modification || null, order: f.order || null }),
+    templateName: state.selectedTemplate ? (getTemplates().find(t => t.id === state.selectedTemplate)?.name || '') : '',
+    batchValue: JSON.stringify({
+      basicPlatform: f.basicPlatform || null,
+      part: f.part || null,
+      modification: f.modification || null,
+      order: f.order || null,
+      date: $('#date-pick').value || null,
+      otkRole: state.otkRole || null,
+      otkPerson: state.otkPerson || null,
+      templateId: state.selectedTemplate || null,
+    }),
     searchValue: f.search || '',
   });
   toast('Фильтр сохранён');
@@ -1478,6 +1524,10 @@ async function printPdf() {
       part: state.productFilter.part || null,
       modification: state.productFilter.modification || null,
       order: state.productFilter.order || null,
+      date: $('#date-pick').value || null,
+      otkRole: state.otkRole || null,
+      otkPerson: state.otkPerson || null,
+      templateId: tpl.id || null,
     }),
     searchValue: state.productFilter.search || '',
   });
@@ -1913,10 +1963,32 @@ async function initGrist() {
   if (window.grist) {
     grist.ready({ requiredAccess: 'full' });
     state.gristFull = true;
+
+    // Try getUserProfile() first (supported in modern Grist builds).
+    let gotName = false;
     try {
-      const profile = await grist.getUserProfile();
-      if (profile && profile.name) state.filterAuthor = profile.name;
+      if (typeof grist.getUserProfile === 'function') {
+        const profile = await withTimeout(grist.getUserProfile(), 5000);
+        const name = profile && (profile.name || profile.email);
+        if (name) { state.filterAuthor = name; gotName = true; }
+      }
     } catch {}
+
+    // Fallback: call the Grist REST API with the widget's access token.
+    if (!gotName) {
+      try {
+        const tokenInfo = await withTimeout(grist.docApi.getAccessToken({ readOnly: true }), 5000);
+        const apiBase = tokenInfo.baseUrl.replace(/\/docs\/[^/]+$/, '');
+        const res = await withTimeout(fetch(`${apiBase}/profile/user`, {
+          headers: { Authorization: `Bearer ${tokenInfo.token}` },
+        }), 5000);
+        if (res.ok) {
+          const u = await res.json();
+          const name = u && (u.name || u.email);
+          if (name) state.filterAuthor = name;
+        }
+      } catch {}
+    }
   }
 
   await refreshTemplates();
