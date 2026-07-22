@@ -60,11 +60,12 @@
   .filter-chip {
     display: inline-flex; align-items: center; gap: 6px;
     background: #eef3ff; border: 1px solid #c8d6f5;
-    padding: 4px 10px; border-radius: 14px; margin: 2px 4px 2px 0;
+    padding: 4px 8px 4px 4px; border-radius: 8px; margin: 2px 4px 2px 0;
     font-size: 12px;
   }
   .filter-chip .author { color: var(--muted); font-size: 11px; }
-  .fc-avatar { display:inline-flex; align-items:center; justify-content:center; width:22px; height:18px; border-radius:4px; color:#fff; font-size:10px; font-weight:700; font-family:inherit; flex-shrink:0; title-cursor:default; }
+  /* avatar radius(4) + chip top-padding(4) = chip radius(8) → концентрично */
+  .fc-avatar { display:inline-flex; align-items:center; justify-content:center; width:22px; height:18px; border-radius:4px; color:#fff; font-size:10px; font-weight:700; font-family:inherit; flex-shrink:0; }
   .filter-chip .x { opacity: 0.5; cursor: pointer; }
   .filter-chip .x:hover { opacity: 1; color: var(--danger); }
   .filter-empty { color: var(--muted); font-style: italic; font-size: 12px; }
@@ -527,7 +528,7 @@
 /* ====================================================================
    GLOBAL STATE
    ==================================================================== */
-const VERSION = 'v0.45.0';
+const VERSION = 'v0.45.1';
 
 // Grist table ids (service tables for templates / last-used filters).
 const TABLE_TEMPLATES = 'Report_template';
@@ -1593,18 +1594,21 @@ async function exportCalibrationFiles() {
     const products = state.catalog.products.filter(p => selectedIds.includes(p.id));
     if (!products.length) { toast('Изделия не найдены в каталоге'); return; }
     const serials = [...new Set(products.map(p => p.productCode).filter(Boolean))];
+    if (!serials.length) { toast('Серийные номера не найдены у выбранных изделий'); return; }
 
-    // 2. Query product_files via SQL — parameterized IN list to avoid injection
+    // 2. Query product_files via SQL — parameterized IN list
     const tokenInfo = await withTimeout(grist.docApi.getAccessToken({ readOnly: true }), 5000);
     const placeholders = serials.map(() => '?').join(', ');
-    const sql = `SELECT file_id, serial_number FROM ${TABLE_PRODUCT_FILES}
-                 WHERE file_type = 'cc' AND serial_number IN (${placeholders})`;
+    const sql = `SELECT file_id, serial_number FROM ${TABLE_PRODUCT_FILES} WHERE file_type = 'cc' AND serial_number IN (${placeholders})`;
     const res = await withTimeout(fetch(`${tokenInfo.baseUrl}/sql?auth=${tokenInfo.token}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ sql, args: serials }),
     }), 15000);
-    if (!res.ok) throw new Error(`SQL ${res.status}`);
+    if (!res.ok) {
+      const txt = await res.text().catch(() => '');
+      throw new Error(`SQL ${res.status}: ${txt.slice(0, 120)}`);
+    }
     const sqlData = await res.json();
 
     const fileRecords = (sqlData.records || []).map(r => ({
@@ -1616,51 +1620,30 @@ async function exportCalibrationFiles() {
       toast('Калибровочные файлы (cc) не найдены для выбранных изделий'); return;
     }
 
-    // 3. Download files sequentially: fetch blob, then trigger download.
-    // Sequential (not parallel) avoids browser popup-blocker and filename collisions.
+    // 3. Download files sequentially via direct <a href> link.
+    // Direct-link approach avoids CORS restrictions that block fetch() from an iframe.
+    // Sequential with 600ms delay prevents browser from treating it as popup flood.
     sub.textContent = `0 / ${fileRecords.length}…`;
-    let ok = 0, fail = 0;
     for (let i = 0; i < fileRecords.length; i++) {
       const { fileId, serial } = fileRecords[i];
       sub.textContent = `${i + 1} / ${fileRecords.length}…`;
-      try {
-        // Fetch blob with Grist auth token (URL may be session-restricted)
-        const dlRes = await withTimeout(
-          fetch(`https://db.mp-lab.ru/fileAPI/download/${encodeURIComponent(fileId)}?auth=${tokenInfo.token}`),
-          30000
-        );
-        if (!dlRes.ok) throw new Error(`HTTP ${dlRes.status}`);
-        const blob = await dlRes.blob();
-
-        // Derive filename from Content-Disposition or fallback to serial_fileId
-        let filename = `cc_${serial}_${fileId}`;
-        const cd = dlRes.headers.get('Content-Disposition') || '';
-        const m = cd.match(/filename[^;=\n]*=\s*(?:UTF-8''|"?)([^";\n]+)/i);
-        if (m && m[1]) filename = decodeURIComponent(m[1].trim());
-
-        const blobUrl = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = blobUrl;
-        a.download = filename;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        // Small delay so browser can start the download before we revoke URL and start next
-        await new Promise(r => setTimeout(r, 400));
-        URL.revokeObjectURL(blobUrl);
-        ok++;
-      } catch (e) {
-        console.error(`CC download failed for fileId=${fileId}:`, e);
-        fail++;
+      const url = `https://db.mp-lab.ru/fileAPI/download/${encodeURIComponent(String(fileId))}?auth=${encodeURIComponent(tokenInfo.token)}`;
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `cc_${serial}_${fileId}`;
+      a.style.display = 'none';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      if (i < fileRecords.length - 1) {
+        await new Promise(r => setTimeout(r, 600));
       }
     }
 
-    toast(fail === 0
-      ? `Загружено ${ok} файл(ов)`
-      : `Загружено ${ok}, ошибок ${fail}`);
+    toast(`Начата загрузка ${fileRecords.length} файл(ов)`);
   } catch (e) {
     console.error('exportCalibrationFiles failed:', e);
-    toast('Ошибка при выгрузке калибровочных файлов');
+    toast('Ошибка: ' + (e && e.message ? e.message.slice(0, 100) : e));
   } finally {
     btn.disabled = false;
     sub.textContent = 'калибровочные файлы';
