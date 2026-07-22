@@ -528,7 +528,7 @@
 /* ====================================================================
    GLOBAL STATE
    ==================================================================== */
-const VERSION = 'v0.45.1';
+const VERSION = 'v0.46.0';
 
 // Grist table ids (service tables for templates / last-used filters).
 const TABLE_TEMPLATES = 'Report_template';
@@ -1013,6 +1013,12 @@ async function reapplyLastFilter(idx) {
   await loadBpOptions(state.productFilter.basicPlatform);
   await maybeLoadProducts();
   renderModeAndOrderOptions();
+
+  // Restore checkbox selection saved with this filter
+  if (snap.selectedIds && Array.isArray(snap.selectedIds) && snap.selectedIds.length) {
+    state.selectedProductIds = new Set(snap.selectedIds);
+  }
+
   renderProductResults();
 
   // Date
@@ -1534,6 +1540,7 @@ function applyProductFilter() {
       otkRole: state.otkRole || null,
       otkPerson: state.otkPerson || null,
       templateId: state.selectedTemplate || null,
+      selectedIds: state.selectedProductIds.size ? [...state.selectedProductIds] : null,
     }),
     searchValue: f.search || '',
   });
@@ -1593,34 +1600,29 @@ async function exportCalibrationFiles() {
     // 1. Get serial numbers (product_code) for selected products
     const products = state.catalog.products.filter(p => selectedIds.includes(p.id));
     if (!products.length) { toast('Изделия не найдены в каталоге'); return; }
-    const serials = [...new Set(products.map(p => p.productCode).filter(Boolean))];
-    if (!serials.length) { toast('Серийные номера не найдены у выбранных изделий'); return; }
+    const serials = new Set(products.map(p => p.productCode).filter(Boolean));
+    if (!serials.size) { toast('Серийные номера не найдены у выбранных изделий'); return; }
 
-    // 2. Query product_files via SQL — parameterized IN list
-    const tokenInfo = await withTimeout(grist.docApi.getAccessToken({ readOnly: true }), 5000);
-    const placeholders = serials.map(() => '?').join(', ');
-    const sql = `SELECT file_id, serial_number FROM ${TABLE_PRODUCT_FILES} WHERE file_type = 'cc' AND serial_number IN (${placeholders})`;
-    const res = await withTimeout(fetch(`${tokenInfo.baseUrl}/sql?auth=${tokenInfo.token}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ sql, args: serials }),
-    }), 15000);
-    if (!res.ok) {
-      const txt = await res.text().catch(() => '');
-      throw new Error(`SQL ${res.status}: ${txt.slice(0, 120)}`);
-    }
-    const sqlData = await res.json();
-
-    const fileRecords = (sqlData.records || []).map(r => ({
-      fileId: r.fields.file_id,
-      serial: r.fields.serial_number,
-    })).filter(r => r.fileId);
+    // 2. Fetch product_files via docApi.fetchTable (postMessage — нет CORS-ограничений)
+    sub.textContent = 'загрузка таблицы…';
+    const pfData = await withTimeout(grist.docApi.fetchTable(TABLE_PRODUCT_FILES), 20000);
+    const fileRecords = (pfData.id || []).reduce((acc, _, i) => {
+      if (String(pfData.file_type[i]).toLowerCase() === 'cc' &&
+          serials.has(String(pfData.serial_number[i]))) {
+        const fid = pfData.file_id[i];
+        if (fid) acc.push({ fileId: fid, serial: String(pfData.serial_number[i]) });
+      }
+      return acc;
+    }, []);
 
     if (!fileRecords.length) {
       toast('Калибровочные файлы (cc) не найдены для выбранных изделий'); return;
     }
 
-    // 3. Download files sequentially via direct <a href> link.
+    // 3. Get auth token for download URLs (postMessage — no CORS issues)
+    const tokenInfo = await withTimeout(grist.docApi.getAccessToken({ readOnly: true }), 5000);
+
+    // 4. Download files sequentially via direct <a href> link.
     // Direct-link approach avoids CORS restrictions that block fetch() from an iframe.
     // Sequential with 600ms delay prevents browser from treating it as popup flood.
     sub.textContent = `0 / ${fileRecords.length}…`;
@@ -1834,6 +1836,7 @@ async function printPdf() {
       otkRole: state.otkRole || null,
       otkPerson: state.otkPerson || null,
       templateId: tpl.id || null,
+      selectedIds: selectedProducts.map(p => p.id),
     }),
     searchValue: state.productFilter.search || '',
   });
