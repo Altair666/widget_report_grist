@@ -427,7 +427,6 @@
     <label>Исполнение: <div class="fc" id="mode-fc"><input class="fc-input" type="text" autocomplete="off" spellcheck="false" placeholder="— все —"></div></label>
     <label>Заказ: <div class="fc" id="order-fc"><input class="fc-input" type="text" autocomplete="off" spellcheck="false" placeholder="— все —"></div></label>
     <label>Поиск: <input type="text" id="filter-search" placeholder="текст..." /></label>
-    <label>Автор: <input type="text" id="filter-author" placeholder="ваше имя" style="width:90px"></label>
     <div class="filter-actions">
       <button class="toolbar-btn" id="reset-filter">Сбросить</button>
       <button class="toolbar-btn" id="apply-filter">Применить</button>
@@ -523,7 +522,7 @@
 /* ====================================================================
    GLOBAL STATE
    ==================================================================== */
-const VERSION = 'v0.44.0';
+const VERSION = 'v0.44.1';
 
 // Grist table ids (service tables for templates / last-used filters).
 const TABLE_TEMPLATES = 'Report_template';
@@ -546,8 +545,6 @@ const state = {
   placedFields: [],             // {id, type, group, page, x, y}  (x,y in 0..1 of page)
   activeGroup: 1,
   groupCount: 1,
-  filterAuthor: 'неизвестный пользователь',
-  filterAuthorAutoDetected: false,
   tableId: null,
   selectedDate: null,           // Date shown on the main screen; printed into PDF "date" fields bare (no "дата:" prefix)
   gristFull: false,             // true if grist.docApi (requiredAccess:'full') is available
@@ -717,7 +714,7 @@ async function pushLastFilter(filter) {
   try {
     const res = await withTimeout(grist.docApi.applyUserActions([['AddRecord', TABLE_LAST_FILTERS, null, {
       Label: entry.label || '',
-      Author: entry.author || '',
+      // Author не передаём — Grist заполняет через триггер-формулу $Author = user.Name
       BatchValue: entry.batchValue || '',
       OrderValue: entry.orderValue || '',
       SearchValue: entry.searchValue || '',
@@ -725,6 +722,8 @@ async function pushLastFilter(filter) {
       AppliedAt: Math.floor(entry.appliedAt / 1000),
     }]]));
     if (res && res.retValues) entry._rowId = res.retValues[0];
+    // Re-read to pick up the Grist-filled Author field
+    await refreshLastFilters();
   } catch (e) {
     console.error('Grist AddRecord(LastFilters) failed', e);
   }
@@ -1500,7 +1499,6 @@ function applyProductFilter() {
   if (!parts.length) { toast('Фильтр не задан'); return; }
   pushLastFilter({
     label: parts.join(', '),
-    author: state.filterAuthor,
     templateName: state.selectedTemplate ? (getTemplates().find(t => t.id === state.selectedTemplate)?.name || '') : '',
     batchValue: JSON.stringify({
       basicPlatform: f.basicPlatform || null,
@@ -1723,7 +1721,6 @@ async function printPdf() {
 
   pushLastFilter({
     label: `печать (${tpl.name}) × ${selectedProducts.length}`,
-    author: state.filterAuthor,
     templateName: tpl.name,
     batchValue: JSON.stringify({
       basicPlatform: state.productFilter.basicPlatform || null,
@@ -2076,7 +2073,7 @@ async function saveTemplate() {
     otkFontSize:   Math.max(5, Math.min(24, parseInt($('#otk-font-size').value)   || 9)),
     pdfBase64: state.pdfBase64,
     updatedAt: Date.now(),
-    updatedBy: state.filterAuthor,
+    updatedBy: '',  // filled by Grist trigger formula $UpdatedBy = user.Name
     basicPlatform: state.editingTemplate.basicPlatform || null,
   };
   const ok = await persistTemplate(tpl);
@@ -2127,13 +2124,6 @@ function bindEvents() {
   });
   $('#apply-filter').addEventListener('click', applyProductFilter);
   $('#reset-filter').addEventListener('click', resetProductFilter);
-  $('#filter-author').addEventListener('input', e => {
-    state.filterAuthor = e.target.value.trim() || 'неизвестный пользователь';
-    state.filterAuthorAutoDetected = false;
-    if (state.gristFull && typeof grist.setWidgetOptions === 'function') {
-      grist.setWidgetOptions({ authorName: state.filterAuthor }).catch(() => {});
-    }
-  });
 
   $('#otk-role').addEventListener('change', e => { state.otkRole = e.target.value; updateOtkDisplays(); });
   $('#otk-person').addEventListener('change', e => { state.otkPerson = e.target.value; updateOtkDisplays(); });
@@ -2176,68 +2166,8 @@ async function initGrist() {
     grist.ready({ requiredAccess: 'full' });
     state.gristFull = true;
 
-    // Load saved author name from widget options (persisted by user).
-    // We'll override it with auto-detected name if that succeeds.
-    try {
-      grist.onOptions(opts => {
-        if (opts && opts.authorName && !state.filterAuthorAutoDetected) {
-          state.filterAuthor = opts.authorName;
-          const el = $('#filter-author');
-          if (el && document.activeElement !== el) el.value = opts.authorName;
-        }
-      });
-    } catch {}
-
-    let gotName = false;
-
-    // 1. getUserProfile() — supported in modern Grist (v1.1.5+).
-    try {
-      if (typeof grist.getUserProfile === 'function') {
-        const profile = await withTimeout(grist.getUserProfile(), 4000);
-        const name = profile && (profile.name || profile.email);
-        if (name) { state.filterAuthor = name; gotName = true; }
-      }
-    } catch {}
-
-    // 2. REST /api/profile/user — try ?auth query-param then Bearer header.
-    if (!gotName) {
-      try {
-        const tokenInfo = await withTimeout(grist.docApi.getAccessToken({ readOnly: true }), 5000);
-        const apiBase = tokenInfo.baseUrl.replace(/\/docs\/[^/]+$/, '');
-        let res = await withTimeout(
-          fetch(`${apiBase}/profile/user?auth=${encodeURIComponent(tokenInfo.token)}`), 5000);
-        if (!res.ok) {
-          res = await withTimeout(fetch(`${apiBase}/profile/user`, {
-            headers: { Authorization: `Bearer ${tokenInfo.token}` },
-          }), 5000);
-        }
-        if (res.ok) {
-          const u = await res.json();
-          const name = u && (u.name || u.email);
-          if (name) { state.filterAuthor = name; gotName = true; }
-        }
-      } catch {}
-    }
-
-    // 3. JWT payload decode — last resort (some Grist builds include name/email in token).
-    if (!gotName) {
-      try {
-        const tokenInfo = await withTimeout(grist.docApi.getAccessToken({ readOnly: true }), 3000);
-        const part = tokenInfo.token.split('.')[1];
-        if (part) {
-          const b64 = part.replace(/-/g, '+').replace(/_/g, '/');
-          const payload = JSON.parse(atob(b64 + '='.repeat((4 - b64.length % 4) % 4)));
-          const name = payload && (payload.name || payload.email || payload.sub);
-          if (name && typeof name === 'string' && !/^\d+$/.test(name)) {
-            state.filterAuthor = name; gotName = true;
-          }
-        }
-      } catch {}
-    }
-
-    if (gotName) state.filterAuthorAutoDetected = true;
-    const authorEl = $('#filter-author');
-    if (authorEl) authorEl.value = state.filterAuthor;
+    // Author column in Report_last_filter is filled server-side via Grist
+    // trigger formula ($Author = user.Name) — no JS detection needed.
   }
 
   await refreshTemplates();

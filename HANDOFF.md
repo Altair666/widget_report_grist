@@ -10,7 +10,7 @@
 - **Репозиторий:** https://github.com/Altair666/widget_report_grist
 - **Live (GitHub Pages):** https://altair666.github.io/widget_report_grist/
 - **Целевой Grist-документ:** `db.mp-lab.ru`, организация `mp-lab`, документ **«LMP данные изделий»** (id `48G8NAEGKuLnpgBo36bWHM`). Уточнено 2026-06-19 через Grist API (read-only) — там же лежат `Report_template`/`Report_last_filter` (см. §5) и каталог изделий `Basic_platforms`/`Parts`/`Modifications`/`Orders`/`Products` (см. §6). Старое указание на `lmp-test-dec.getgrist.com/5GtDphApyrjG` было устаревшим/неверным — не использовать.
-- **Текущая версия:** `v0.44.0`
+- **Текущая версия:** `v0.44.1`
 - **Стек:** один `index.html` (HTML + CSS + vanilla JS), `pdf.js` с CDN, `grist-plugin-api.js` с CDN.
 
 ---
@@ -86,6 +86,19 @@ export GRIST_API_KEY="..."
 ## 3. История изменений
 
 **Порядок: новые записи добавляются сверху, сразу после этого заголовка — самая последняя версия должна быть первой, самая старая — последней.** (До 2026-06-19 список был перемешан: записи до v0.11.0 шли по возрастанию, после — по убыванию; восстановлено руками один раз, дальше поддерживается этим правилом.)
+
+### v0.44.1 — fix: Author через Grist триггер-формулу, убран JS-детект пользователя
+
+- `pushLastFilter`: убрано поле Author из `AddRecord` — Grist заполняет через триггер-формулу
+  `$Author = user.Name` на колонке Report_last_filter.Author.
+  После `applyUserActions` вызывается `refreshLastFilters()` — чипы сразу получают
+  правильное имя из Grist без перезагрузки страницы.
+- `persistTemplate`: updatedBy = '' — аналогично, должна быть триггер-формула в Grist.
+- Убраны: поле «Автор:» из filter bar, весь JS-блок авто-обнаружения (getUserProfile /
+  REST /profile/user / JWT decode), state.filterAuthor, state.filterAuthorAutoDetected.
+- **Требование к Grist**: колонка Report_last_filter.Author должна иметь триггер-формулу
+  `user.Name` (тип trigger, recalcWhen = changes_to_record, on add).
+  То же для Report_template.UpdatedBy если нужен автор шаблона.
 
 ### v0.44.0 — feat: combobox-фильтры + ручной ввод автора + «Код изделия» вторым столбцом
 
