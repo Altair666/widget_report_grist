@@ -528,7 +528,7 @@
 /* ====================================================================
    GLOBAL STATE
    ==================================================================== */
-const VERSION = 'v0.46.0';
+const VERSION = 'v0.46.1';
 
 // Grist table ids (service tables for templates / last-used filters).
 const TABLE_TEMPLATES = 'Report_template';
@@ -1606,6 +1606,10 @@ async function exportCalibrationFiles() {
     // 2. Fetch product_files via docApi.fetchTable (postMessage — нет CORS-ограничений)
     sub.textContent = 'загрузка таблицы…';
     const pfData = await withTimeout(grist.docApi.fetchTable(TABLE_PRODUCT_FILES), 20000);
+    const totalRows = (pfData.id || []).length;
+    // Diagnose column availability in case table schema differs
+    const colList = Object.keys(pfData).filter(k => k !== 'id').join(', ');
+    console.log(`product_files: ${totalRows} rows, columns: ${colList}`);
     const fileRecords = (pfData.id || []).reduce((acc, _, i) => {
       if (String(pfData.file_type[i]).toLowerCase() === 'cc' &&
           serials.has(String(pfData.serial_number[i]))) {
@@ -1616,11 +1620,20 @@ async function exportCalibrationFiles() {
     }, []);
 
     if (!fileRecords.length) {
-      toast('Калибровочные файлы (cc) не найдены для выбранных изделий'); return;
+      toast(`CC-файлы не найдены (таблица: ${totalRows} строк, колонки: ${colList})`); return;
     }
 
     // 3. Get auth token for download URLs (postMessage — no CORS issues)
-    const tokenInfo = await withTimeout(grist.docApi.getAccessToken({ readOnly: true }), 5000);
+    sub.textContent = 'получение токена…';
+    let tokenInfo;
+    try {
+      tokenInfo = await withTimeout(grist.docApi.getAccessToken({ readOnly: true }), 5000);
+    } catch (te) {
+      throw new Error('Ошибка получения токена: ' + (te.message || te));
+    }
+    if (!tokenInfo || !tokenInfo.token) {
+      throw new Error('Токен не получен от Grist (getAccessToken вернул пустой результат)');
+    }
 
     // 4. Download files sequentially via direct <a href> link.
     // Direct-link approach avoids CORS restrictions that block fetch() from an iframe.
