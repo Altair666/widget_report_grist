@@ -87,6 +87,14 @@ export GRIST_API_KEY="..."
 
 **Порядок: новые записи добавляются сверху, сразу после этого заголовка — самая последняя версия должна быть первой, самая старая — последней.** (До 2026-06-19 список был перемешан: записи до v0.11.0 шли по возрастанию, после — по убыванию; восстановлено руками один раз, дальше поддерживается этим правилом.)
 
+### v0.46.3 — fix: serial_number — это Reference, сравнение по row ID
+
+- `Product_files.serial_number` — Reference-колонка на Products → fetchTable
+  возвращает числовой row ID, не текстовый код изделия.
+- Убрано промежуточное построение Set из productCode; теперь фильтр
+  сравнивает `pfData.serial_number[i]` напрямую с `state.selectedProductIds`.
+- Имя скачиваемого файла: `cc_{productCode}_{fileId}` через lookup по id.
+
 ### v0.46.2 — fix: TABLE_PRODUCT_FILES = 'Product_files' (регистр)
 
 - Имя таблицы `product_files` → `Product_files` — все таблицы в этом документе

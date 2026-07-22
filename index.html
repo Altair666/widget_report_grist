@@ -528,7 +528,7 @@
 /* ====================================================================
    GLOBAL STATE
    ==================================================================== */
-const VERSION = 'v0.46.2';
+const VERSION = 'v0.46.3';
 
 // Grist table ids (service tables for templates / last-used filters).
 const TABLE_TEMPLATES = 'Report_template';
@@ -1597,30 +1597,34 @@ async function exportCalibrationFiles() {
   sub.textContent = 'запрос…';
 
   try {
-    // 1. Get serial numbers (product_code) for selected products
-    const products = state.catalog.products.filter(p => selectedIds.includes(p.id));
-    if (!products.length) { toast('Изделия не найдены в каталоге'); return; }
-    const serials = new Set(products.map(p => p.productCode).filter(Boolean));
-    if (!serials.size) { toast('Серийные номера не найдены у выбранных изделий'); return; }
+    // serial_number in Product_files is a Reference column → fetchTable returns
+    // the Grist row ID of the referenced Products row (a number), not the text code.
+    // So we compare directly against selectedIds (which are product row IDs).
+    const selectedIdsSet = state.selectedProductIds; // Set<number>
+
+    // 1. Build productCode lookup for download filenames
+    const productById = new Map(
+      state.catalog.products.filter(p => selectedIdsSet.has(p.id)).map(p => [p.id, p])
+    );
 
     // 2. Fetch product_files via docApi.fetchTable (postMessage — нет CORS-ограничений)
     sub.textContent = 'загрузка таблицы…';
     const pfData = await withTimeout(grist.docApi.fetchTable(TABLE_PRODUCT_FILES), 20000);
-    const totalRows = (pfData.id || []).length;
-    // Diagnose column availability in case table schema differs
-    const colList = Object.keys(pfData).filter(k => k !== 'id').join(', ');
-    console.log(`product_files: ${totalRows} rows, columns: ${colList}`);
     const fileRecords = (pfData.id || []).reduce((acc, _, i) => {
-      if (String(pfData.file_type[i]).toLowerCase() === 'cc' &&
-          serials.has(String(pfData.serial_number[i]))) {
+      const refId = pfData.serial_number[i]; // row ID of referenced Products row
+      if (String(pfData.file_type[i]).toLowerCase() === 'cc' && selectedIdsSet.has(refId)) {
         const fid = pfData.file_id[i];
-        if (fid) acc.push({ fileId: fid, serial: String(pfData.serial_number[i]) });
+        if (fid) {
+          const prod = productById.get(refId);
+          const label = prod ? (prod.productCode || String(refId)) : String(refId);
+          acc.push({ fileId: fid, label });
+        }
       }
       return acc;
     }, []);
 
     if (!fileRecords.length) {
-      toast(`CC-файлы не найдены (таблица: ${totalRows} строк, колонки: ${colList})`); return;
+      toast('CC-файлы не найдены для выбранных изделий'); return;
     }
 
     // 3. Get auth token for download URLs (postMessage — no CORS issues)
@@ -1640,12 +1644,12 @@ async function exportCalibrationFiles() {
     // Sequential with 600ms delay prevents browser from treating it as popup flood.
     sub.textContent = `0 / ${fileRecords.length}…`;
     for (let i = 0; i < fileRecords.length; i++) {
-      const { fileId, serial } = fileRecords[i];
+      const { fileId, label } = fileRecords[i];
       sub.textContent = `${i + 1} / ${fileRecords.length}…`;
       const url = `https://db.mp-lab.ru/fileAPI/download/${encodeURIComponent(String(fileId))}?auth=${encodeURIComponent(tokenInfo.token)}`;
       const a = document.createElement('a');
       a.href = url;
-      a.download = `cc_${serial}_${fileId}`;
+      a.download = `cc_${label}_${fileId}`;
       a.style.display = 'none';
       document.body.appendChild(a);
       a.click();
