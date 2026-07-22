@@ -528,7 +528,7 @@
 /* ====================================================================
    GLOBAL STATE
    ==================================================================== */
-const VERSION = 'v0.46.5';
+const VERSION = 'v0.47.0';
 
 // Grist table ids (service tables for templates / last-used filters).
 const TABLE_TEMPLATES = 'Report_template';
@@ -1627,31 +1627,77 @@ async function exportCalibrationFiles() {
       toast('CC-файлы не найдены для выбранных изделий'); return;
     }
 
-    // 3. Download files sequentially.
-    // <a target="_blank"> opens in a new tab so the browser never navigates
-    // the widget iframe itself (cross-origin navigation would show a login page).
-    // Standard Grist attachment URL: {baseUrl}/attachments/{id}/download?auth={token}
-    // — getAccessToken() tokens are designed for exactly this endpoint.
+    // 3. Try File System Access API (Chrome/Edge): user picks a folder once,
+    // all files are fetched and written there directly without per-file dialogs.
+    // Falls back to opening new tabs if FSA is unavailable or CORS blocks fetch.
+    if (typeof window.showDirectoryPicker === 'function') {
+      let dirHandle;
+      try {
+        dirHandle = await window.showDirectoryPicker({ mode: 'readwrite' });
+      } catch (e) {
+        if (e.name === 'AbortError') return; // user cancelled picker — stop entirely
+        dirHandle = null;
+      }
+
+      if (dirHandle) {
+        // Get auth token for cross-origin fetch to fileAPI
+        let tokenInfo;
+        try {
+          tokenInfo = await withTimeout(grist.docApi.getAccessToken({ readOnly: true }), 5000);
+        } catch { /* proceed without token — try unauthenticated */ }
+
+        let saved = 0, failed = 0;
+        for (let i = 0; i < fileRecords.length; i++) {
+          const { fileId, label } = fileRecords[i];
+          sub.textContent = `${i + 1} / ${fileRecords.length}…`;
+          try {
+            // Try fileAPI with auth token; if server doesn't need it the param is ignored
+            const fetchUrl = tokenInfo
+              ? `https://db.mp-lab.ru/fileAPI/download/${encodeURIComponent(String(fileId))}?auth=${encodeURIComponent(tokenInfo.token)}`
+              : `https://db.mp-lab.ru/fileAPI/download/${encodeURIComponent(String(fileId))}`;
+            const resp = await withTimeout(fetch(fetchUrl), 30000);
+            if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+            const blob = await resp.blob();
+
+            // Use Content-Disposition filename if server provides one
+            const cd = resp.headers.get('content-disposition') || '';
+            const fnMatch = cd.match(/filename\*?=(?:UTF-8''|"?)([^";\r\n]+)/i);
+            const filename = fnMatch
+              ? decodeURIComponent(fnMatch[1].replace(/"/g, '').trim())
+              : `cc_${label}_${fileId}`;
+
+            const fh = await dirHandle.getFileHandle(filename, { create: true });
+            const writable = await fh.createWritable();
+            await writable.write(blob);
+            await writable.close();
+            saved++;
+          } catch (fe) {
+            console.warn('FSA write failed for fileId', fileId, fe);
+            failed++;
+          }
+        }
+        const msg = failed
+          ? `Сохранено ${saved} файлов, ${failed} не удалось (CORS или ошибка сети)`
+          : `Сохранено ${saved} файлов в выбранную папку`;
+        toast(msg);
+        return;
+      }
+    }
+
+    // Fallback: open each file in a new tab (browser will show Save As dialog)
     sub.textContent = `0 / ${fileRecords.length}…`;
     for (let i = 0; i < fileRecords.length; i++) {
-      const { fileId, label } = fileRecords[i];
+      const { fileId } = fileRecords[i];
       sub.textContent = `${i + 1} / ${fileRecords.length}…`;
-      const url = `https://db.mp-lab.ru/fileAPI/download/${encodeURIComponent(String(fileId))}`;
-      const a = document.createElement('a');
-      a.href = url;
-      a.target = '_blank';
-      a.rel = 'noopener';
-      a.download = `cc_${label}_${fileId}`;
-      a.style.display = 'none';
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
+      window.open(
+        `https://db.mp-lab.ru/fileAPI/download/${encodeURIComponent(String(fileId))}`,
+        '_blank', 'noopener'
+      );
       if (i < fileRecords.length - 1) {
         await new Promise(r => setTimeout(r, 600));
       }
     }
-
-    toast(`Начата загрузка ${fileRecords.length} файл(ов)`);
+    toast(`Открыто ${fileRecords.length} файл(ов) в новых вкладках`);
   } catch (e) {
     console.error('exportCalibrationFiles failed:', e);
     toast('Ошибка: ' + (e && e.message ? e.message.slice(0, 100) : e));
