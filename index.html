@@ -527,7 +527,7 @@
 /* ====================================================================
    GLOBAL STATE
    ==================================================================== */
-const VERSION = 'v0.47.1';
+const VERSION = 'v0.47.2';
 
 // Grist table ids (service tables for templates / last-used filters).
 const TABLE_TEMPLATES = 'Report_template';
@@ -1637,23 +1637,26 @@ async function exportCalibrationFiles() {
     // Blob URL is always same-origin so the `download` attribute works and the
     // browser saves directly to the Downloads folder without opening new tabs
     // or showing per-file Save-As dialogs.
-    // Falls back to window.open if fetch is blocked by CORS.
-    let corsBlocked = false;
+    // Standard Grist attachment API has CORS headers (same /api/ path as SQL).
+    // fileAPI/download is a custom path without CORS — only works via browser nav.
+    // Falls back to window.open (new tab) if fetch fails.
+    if (!tokenInfo) {
+      toast('Не удалось получить токен Grist'); return;
+    }
+    let fetchWorks = null; // determined on first file
     let downloaded = 0;
     for (let i = 0; i < fileRecords.length; i++) {
       const { fileId, label } = fileRecords[i];
       sub.textContent = `${i + 1} / ${fileRecords.length}…`;
 
-      if (!corsBlocked) {
+      if (fetchWorks !== false) {
         try {
-          const fetchUrl = tokenInfo
-            ? `https://db.mp-lab.ru/fileAPI/download/${encodeURIComponent(String(fileId))}?auth=${encodeURIComponent(tokenInfo.token)}`
-            : `https://db.mp-lab.ru/fileAPI/download/${encodeURIComponent(String(fileId))}`;
+          // Use standard Grist attachment endpoint — same /api/ root as SQL, CORS allowed
+          const fetchUrl = `${tokenInfo.baseUrl}/attachments/${encodeURIComponent(String(fileId))}/download?auth=${encodeURIComponent(tokenInfo.token)}`;
           const resp = await withTimeout(fetch(fetchUrl), 30000);
           if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
           const blob = await resp.blob();
 
-          // Prefer server-provided filename from Content-Disposition
           const cd = resp.headers.get('content-disposition') || '';
           const fnMatch = cd.match(/filename\*?=(?:UTF-8''|"?)([^";\r\n]+)/i);
           const filename = fnMatch
@@ -1669,17 +1672,17 @@ async function exportCalibrationFiles() {
           a.click();
           document.body.removeChild(a);
           setTimeout(() => URL.revokeObjectURL(blobUrl), 10000);
+          fetchWorks = true;
           downloaded++;
-          if (i < fileRecords.length - 1) await new Promise(r => setTimeout(r, 200));
+          if (i < fileRecords.length - 1) await new Promise(r => setTimeout(r, 300));
           continue;
         } catch (fe) {
-          console.warn('fetch failed for fileId', fileId, fe);
-          // If first file fails it's likely CORS — switch to window.open for all remaining
-          if (i === 0) corsBlocked = true;
+          console.warn('Grist attachment fetch failed for fileId', fileId, fe);
+          fetchWorks = false; // switch all remaining to window.open
         }
       }
 
-      // CORS fallback: open in new tab
+      // Fallback: open in new tab via original fileAPI URL (browser session auth)
       window.open(
         `https://db.mp-lab.ru/fileAPI/download/${encodeURIComponent(String(fileId))}`,
         '_blank', 'noopener'
@@ -1687,8 +1690,8 @@ async function exportCalibrationFiles() {
       if (i < fileRecords.length - 1) await new Promise(r => setTimeout(r, 600));
     }
 
-    toast(corsBlocked
-      ? `Открыто ${fileRecords.length} файл(ов) в новых вкладках (CORS ограничение)`
+    toast(fetchWorks === false
+      ? `Открыто ${fileRecords.length} файл(ов) в новых вкладках (нет доступа к Grist API)`
       : `Скачано ${downloaded} файл(ов)`);
   } catch (e) {
     console.error('exportCalibrationFiles failed:', e);
