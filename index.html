@@ -112,6 +112,27 @@
   #filter-bar .toolbar-btn { padding: 4px 10px; }
   .filter-actions { margin-left: auto; display: flex; gap: 6px; }
 
+  /* Combobox (filter dropdowns with text input) */
+  .fc { position: relative; display: inline-block; }
+  .fc::after { content: '▾'; position: absolute; right: 5px; top: 50%; transform: translateY(-50%); pointer-events: none; font-size: 10px; color: var(--muted); }
+  .fc-input {
+    border: 1px solid var(--border); border-radius: 4px;
+    padding: 2px 18px 2px 6px; font-size: 12px; min-width: 80px;
+    box-sizing: border-box; background: var(--panel); color: inherit; cursor: text;
+  }
+  .fc-input:focus { outline: 2px solid var(--accent); outline-offset: -1px; border-color: var(--accent); }
+  .fc-drop {
+    display: none; position: fixed; z-index: 9000;
+    background: var(--panel); border: 1px solid var(--border); border-radius: 6px;
+    box-shadow: 0 4px 14px rgba(0,0,0,.18);
+    max-height: 240px; overflow-y: auto; min-width: 140px;
+  }
+  .fc-drop.open { display: block; }
+  .fc-item { padding: 4px 10px; cursor: pointer; font-size: 12px; white-space: nowrap; }
+  .fc-item:hover, .fc-item.fc-active { background: var(--accent); color: #fff; }
+  .fc-item.fc-dim { color: var(--muted); font-style: italic; }
+  .fc-item.fc-none { font-style: italic; }
+
   /* --- Bottom area: filter results --- */
   #filter-section {
     display: grid;
@@ -401,11 +422,12 @@
   </div>
 
   <div class="panel filter-inline" id="filter-bar">
-    <label>Базовое изделие: <select id="bp-select"><option value="">— все —</option></select></label>
-    <label>Партия: <select id="part-select"><option value="">— все —</option></select></label>
-    <label>Исполнение: <select id="mode-select"><option value="">— все —</option></select></label>
-    <label>Заказ: <select id="order-select"><option value="">— все —</option></select></label>
+    <label>Базовое изделие: <div class="fc" id="bp-fc"><input class="fc-input" type="text" autocomplete="off" spellcheck="false" placeholder="— все —"></div></label>
+    <label>Партия: <div class="fc" id="part-fc"><input class="fc-input" type="text" autocomplete="off" spellcheck="false" placeholder="— все —"></div></label>
+    <label>Исполнение: <div class="fc" id="mode-fc"><input class="fc-input" type="text" autocomplete="off" spellcheck="false" placeholder="— все —"></div></label>
+    <label>Заказ: <div class="fc" id="order-fc"><input class="fc-input" type="text" autocomplete="off" spellcheck="false" placeholder="— все —"></div></label>
     <label>Поиск: <input type="text" id="filter-search" placeholder="текст..." /></label>
+    <label>Автор: <input type="text" id="filter-author" placeholder="ваше имя" style="width:90px"></label>
     <div class="filter-actions">
       <button class="toolbar-btn" id="reset-filter">Сбросить</button>
       <button class="toolbar-btn" id="apply-filter">Применить</button>
@@ -501,7 +523,7 @@
 /* ====================================================================
    GLOBAL STATE
    ==================================================================== */
-const VERSION = 'v0.43.0';
+const VERSION = 'v0.44.0';
 
 // Grist table ids (service tables for templates / last-used filters).
 const TABLE_TEMPLATES = 'Report_template';
@@ -525,6 +547,7 @@ const state = {
   activeGroup: 1,
   groupCount: 1,
   filterAuthor: 'неизвестный пользователь',
+  filterAuthorAutoDetected: false,
   tableId: null,
   selectedDate: null,           // Date shown on the main screen; printed into PDF "date" fields bare (no "дата:" prefix)
   gristFull: false,             // true if grist.docApi (requiredAccess:'full') is available
@@ -1214,24 +1237,141 @@ function uniqueCatalogItems(products, key, catalogList) {
   return sortByName(ids.map(id => map.get(id)).filter(Boolean));
 }
 
-function fillFilterSelect(sel, items, currentValue) {
-  const el = $(sel);
-  const keep = items.some(it => it.id === currentValue);
-  el.innerHTML = '<option value="">— все —</option>' +
-    items.map(it => `<option value="${it.id}">${escapeHtml(it.name)}</option>`).join('');
-  el.value = keep ? currentValue : '';
-  return keep;
+// ── Combobox helpers ──────────────────────────────────────────────────────────
+
+// Populate a .fc combobox. Returns true if currentValue was found (kept).
+function fillFilterCombo(fcId, items, currentValue, { showNone = false } = {}) {
+  const fc = $(`#${fcId}`);
+  if (!fc) return true;
+  const input = fc.querySelector('.fc-input');
+  const allItems = [
+    { id: '', name: '— все —', cls: 'fc-dim' },
+    ...(showNone ? [{ id: '__none__', name: '— нет —', cls: 'fc-none' }] : []),
+    ...items,
+  ];
+  fc._items = allItems;
+  const found = allItems.find(it => String(it.id) === String(currentValue));
+  const kept = found !== undefined;
+  fc._value = kept ? found.id : '';
+  // Don't stomp the input while the user is actively typing in this combo
+  if (document.activeElement !== input) {
+    const sel = fc._items.find(it => it.id === fc._value);
+    input.value = (sel && sel.id !== '') ? sel.name : '';
+  } else {
+    // Re-render dropdown to reflect updated items (user might be mid-type)
+    _renderFcDrop(fc, input.value);
+  }
+  return kept;
+}
+
+// Re-render dropdown items filtered by typed text.
+function _renderFcDrop(fc, filterText) {
+  const drop = fc._drop;
+  if (!drop) return;
+  const items = fc._items || [];
+  const f = filterText.trim().toLowerCase();
+  const visible = f
+    ? items.filter(it => it.id === '' || it.name.toLowerCase().includes(f))
+    : items;
+  drop.innerHTML = visible.map(it => {
+    const cls = ['fc-item', it.cls || '', it.id === fc._value ? 'fc-active' : ''].filter(Boolean).join(' ');
+    return `<div class="${cls}" data-val="${escapeHtml(String(it.id))}">${escapeHtml(it.name)}</div>`;
+  }).join('') || '<div class="fc-item fc-dim">Нет вариантов</div>';
+}
+
+// Wire up one combobox. Called once in bindEvents.
+function setupFilterCombo(fcId, onChange) {
+  const fc = $(`#${fcId}`);
+  if (!fc) return;
+  const input = fc.querySelector('.fc-input');
+  const drop = document.createElement('div');
+  drop.className = 'fc-drop';
+  document.body.appendChild(drop);
+  fc._drop = drop;
+  fc._onChange = onChange;
+  fc._items = fc._items || [];
+
+  function openDrop() {
+    const rect = fc.getBoundingClientRect();
+    drop.style.left  = rect.left + 'px';
+    drop.style.top   = (rect.bottom + window.scrollY + 2) + 'px';
+    drop.style.minWidth = rect.width + 'px';
+    _renderFcDrop(fc, input.value);
+    drop.classList.add('open');
+  }
+
+  function closeDrop() {
+    drop.classList.remove('open');
+    // Restore display name for current value
+    const sel = (fc._items || []).find(it => it.id === fc._value);
+    input.value = (sel && sel.id !== '') ? sel.name : '';
+  }
+
+  function pickItem(valStr) {
+    const raw = valStr;
+    const item = (fc._items || []).find(it => String(it.id) === raw);
+    fc._value = item ? item.id : '';
+    closeDrop();
+    if (fc._onChange) fc._onChange(raw);
+  }
+
+  // Click on wrapper arrow area focuses input
+  fc.addEventListener('mousedown', e => {
+    if (e.target === input) return;
+    e.preventDefault();
+    input.focus();
+  });
+
+  input.addEventListener('focus', () => openDrop());
+
+  input.addEventListener('input', () => {
+    _renderFcDrop(fc, input.value);
+    drop.classList.add('open');
+  });
+
+  input.addEventListener('keydown', e => {
+    if (e.key === 'Escape') { closeDrop(); input.blur(); return; }
+    if (e.key === 'Enter') {
+      const active = drop.querySelector('.fc-item.fc-active') || drop.querySelector('.fc-item');
+      if (active) pickItem(active.dataset.val);
+      return;
+    }
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      const items = [...drop.querySelectorAll('.fc-item')];
+      const cur = drop.querySelector('.fc-item.fc-active');
+      if (cur) cur.classList.remove('fc-active');
+      const idx = cur ? items.indexOf(cur) : -1;
+      const next = e.key === 'ArrowDown'
+        ? items[(idx + 1) % items.length]
+        : items[(idx - 1 + items.length) % items.length];
+      if (next) { next.classList.add('fc-active'); next.scrollIntoView({ block: 'nearest' }); }
+    }
+  });
+
+  input.addEventListener('blur', () => {
+    setTimeout(() => {
+      if (!drop.contains(document.activeElement)) closeDrop();
+    }, 120);
+  });
+
+  drop.addEventListener('mousedown', e => {
+    const item = e.target.closest('.fc-item');
+    if (!item) return;
+    e.preventDefault();
+    pickItem(item.dataset.val);
+  });
 }
 
 // Базовое изделие/Партия come straight from the (always fully loaded, small)
 // lookup tables - Parts.basic_platform is a direct ref, no Products needed.
 function renderBasicAndPartOptions() {
   const f = state.productFilter;
-  if (!fillFilterSelect('#bp-select', sortByName(state.catalog.basicPlatforms), f.basicPlatform)) f.basicPlatform = '';
+  if (!fillFilterCombo('bp-fc', sortByName(state.catalog.basicPlatforms), f.basicPlatform)) f.basicPlatform = '';
   const partCandidates = f.basicPlatform
     ? state.catalog.parts.filter(p => p.basicPlatformId === f.basicPlatform)
     : state.catalog.parts;
-  if (!fillFilterSelect('#part-select', sortByName(partCandidates), f.part)) f.part = '';
+  if (!fillFilterCombo('part-fc', sortByName(partCandidates), f.part)) f.part = '';
 }
 
 // Исполнение/Заказ: once products are loaded (state.productsReady), show only
@@ -1258,21 +1398,8 @@ function renderModeAndOrderOptions() {
     modItems = [];
     ordItems = [];
   }
-  if (!fillFilterSelect('#mode-select', modItems, f.modification)) f.modification = '';
-
-  // Order select: fill normal items, then optionally inject "— нет —" for products without an order
-  const isNone = f.order === '__none__';
-  const orderKept = fillFilterSelect('#order-select', ordItems, isNone ? '' : f.order);
-  const orderEl = $('#order-select');
-  if (showNoneOrder) {
-    const noneOpt = document.createElement('option');
-    noneOpt.value = '__none__';
-    noneOpt.textContent = '— нет —';
-    orderEl.insertBefore(noneOpt, orderEl.options[1] || null);
-    if (isNone) orderEl.value = '__none__';
-  }
-  if (!isNone && !orderKept) f.order = '';
-  if (isNone && !showNoneOrder) f.order = '';
+  if (!fillFilterCombo('mode-fc', modItems, f.modification)) f.modification = '';
+  if (!fillFilterCombo('order-fc', ordItems, f.order, { showNone: showNoneOrder })) f.order = '';
 }
 
 function renderFilterOptions() {
@@ -1305,7 +1432,7 @@ function renderProductResults() {
   }
   t.querySelector('thead').innerHTML = `<tr>
     <th><label style="display:flex;align-items:center;gap:4px;font-weight:600;white-space:normal;cursor:pointer;"><input type="checkbox" id="select-all-rows"> Выделить все</label></th>
-    <th>Базовое изделие</th><th>Партия</th><th>Исполнение</th><th>Заказ</th><th>Код изделия</th>
+    <th>Базовое изделие</th><th>Код изделия</th><th>Партия</th><th>Исполнение</th><th>Заказ</th>
   </tr>`;
   if (!state.productFilter.basicPlatform || (!state.productFilter.part && !state.productFilter.modification && !state.productFilter.order)) {
     t.querySelector('tbody').innerHTML = '<tr><td colspan="6"><span class="filter-empty">Выберите базовое изделие и хотя бы ещё один фильтр (партия, исполнение или заказ)</span></td></tr>';
@@ -1324,10 +1451,10 @@ function renderProductResults() {
     t.querySelector('tbody').innerHTML = list.map(p => `<tr>
       <td><input type="checkbox" class="row-select" data-id="${p.id}" ${state.selectedProductIds.has(p.id) ? 'checked' : ''}></td>
       <td>${escapeHtml(bpMap.get(p.basicPlatformId)?.name || '')}</td>
+      <td>${escapeHtml(p.productCode)}</td>
       <td>${escapeHtml(partMap.get(p.partId)?.name || '')}</td>
       <td>${escapeHtml(modMap.get(p.modeId)?.name || '')}</td>
       <td>${escapeHtml(ordMap.get(p.orderId)?.name || '')}</td>
-      <td>${escapeHtml(p.productCode)}</td>
     </tr>`).join('');
   }
   bindResultRowCheckboxes();
@@ -1395,6 +1522,10 @@ function resetProductFilter() {
   state.catalog.products = [];
   state.selectedProductIds.clear();
   $('#filter-search').value = '';
+  for (const fcId of ['bp-fc', 'part-fc', 'mode-fc', 'order-fc']) {
+    const fc = $(`#${fcId}`);
+    if (fc) { fc._value = ''; const inp = fc.querySelector('.fc-input'); if (inp) inp.value = ''; }
+  }
   renderFilterOptions();
   renderProductResults();
 }
@@ -1986,16 +2117,23 @@ function bindEvents() {
   $('#btn-export').addEventListener('click', exportCsv);
   $('#btn-print').addEventListener('click', printPdf);
 
-  $('#bp-select').addEventListener('change', e => onProductFilterChange('basicPlatform', e.target.value));
-  $('#part-select').addEventListener('change', e => onProductFilterChange('part', e.target.value));
-  $('#mode-select').addEventListener('change', e => onProductFilterChange('modification', e.target.value));
-  $('#order-select').addEventListener('change', e => onProductFilterChange('order', e.target.value));
+  setupFilterCombo('bp-fc',    v => onProductFilterChange('basicPlatform', v));
+  setupFilterCombo('part-fc',  v => onProductFilterChange('part', v));
+  setupFilterCombo('mode-fc',  v => onProductFilterChange('modification', v));
+  setupFilterCombo('order-fc', v => onProductFilterChange('order', v));
   $('#filter-search').addEventListener('input', e => {
     state.productFilter.search = e.target.value.trim();
     renderProductResults();
   });
   $('#apply-filter').addEventListener('click', applyProductFilter);
   $('#reset-filter').addEventListener('click', resetProductFilter);
+  $('#filter-author').addEventListener('input', e => {
+    state.filterAuthor = e.target.value.trim() || 'неизвестный пользователь';
+    state.filterAuthorAutoDetected = false;
+    if (state.gristFull && typeof grist.setWidgetOptions === 'function') {
+      grist.setWidgetOptions({ authorName: state.filterAuthor }).catch(() => {});
+    }
+  });
 
   $('#otk-role').addEventListener('change', e => { state.otkRole = e.target.value; updateOtkDisplays(); });
   $('#otk-person').addEventListener('change', e => { state.otkPerson = e.target.value; updateOtkDisplays(); });
@@ -2038,31 +2176,68 @@ async function initGrist() {
     grist.ready({ requiredAccess: 'full' });
     state.gristFull = true;
 
-    // Try getUserProfile() first (supported in modern Grist builds).
+    // Load saved author name from widget options (persisted by user).
+    // We'll override it with auto-detected name if that succeeds.
+    try {
+      grist.onOptions(opts => {
+        if (opts && opts.authorName && !state.filterAuthorAutoDetected) {
+          state.filterAuthor = opts.authorName;
+          const el = $('#filter-author');
+          if (el && document.activeElement !== el) el.value = opts.authorName;
+        }
+      });
+    } catch {}
+
     let gotName = false;
+
+    // 1. getUserProfile() — supported in modern Grist (v1.1.5+).
     try {
       if (typeof grist.getUserProfile === 'function') {
-        const profile = await withTimeout(grist.getUserProfile(), 5000);
+        const profile = await withTimeout(grist.getUserProfile(), 4000);
         const name = profile && (profile.name || profile.email);
         if (name) { state.filterAuthor = name; gotName = true; }
       }
     } catch {}
 
-    // Fallback: call the Grist REST API with the widget's access token.
+    // 2. REST /api/profile/user — try ?auth query-param then Bearer header.
     if (!gotName) {
       try {
         const tokenInfo = await withTimeout(grist.docApi.getAccessToken({ readOnly: true }), 5000);
         const apiBase = tokenInfo.baseUrl.replace(/\/docs\/[^/]+$/, '');
-        const res = await withTimeout(fetch(`${apiBase}/profile/user`, {
-          headers: { Authorization: `Bearer ${tokenInfo.token}` },
-        }), 5000);
+        let res = await withTimeout(
+          fetch(`${apiBase}/profile/user?auth=${encodeURIComponent(tokenInfo.token)}`), 5000);
+        if (!res.ok) {
+          res = await withTimeout(fetch(`${apiBase}/profile/user`, {
+            headers: { Authorization: `Bearer ${tokenInfo.token}` },
+          }), 5000);
+        }
         if (res.ok) {
           const u = await res.json();
           const name = u && (u.name || u.email);
-          if (name) state.filterAuthor = name;
+          if (name) { state.filterAuthor = name; gotName = true; }
         }
       } catch {}
     }
+
+    // 3. JWT payload decode — last resort (some Grist builds include name/email in token).
+    if (!gotName) {
+      try {
+        const tokenInfo = await withTimeout(grist.docApi.getAccessToken({ readOnly: true }), 3000);
+        const part = tokenInfo.token.split('.')[1];
+        if (part) {
+          const b64 = part.replace(/-/g, '+').replace(/_/g, '/');
+          const payload = JSON.parse(atob(b64 + '='.repeat((4 - b64.length % 4) % 4)));
+          const name = payload && (payload.name || payload.email || payload.sub);
+          if (name && typeof name === 'string' && !/^\d+$/.test(name)) {
+            state.filterAuthor = name; gotName = true;
+          }
+        }
+      } catch {}
+    }
+
+    if (gotName) state.filterAuthorAutoDetected = true;
+    const authorEl = $('#filter-author');
+    if (authorEl) authorEl.value = state.filterAuthor;
   }
 
   await refreshTemplates();

@@ -10,7 +10,7 @@
 - **Репозиторий:** https://github.com/Altair666/widget_report_grist
 - **Live (GitHub Pages):** https://altair666.github.io/widget_report_grist/
 - **Целевой Grist-документ:** `db.mp-lab.ru`, организация `mp-lab`, документ **«LMP данные изделий»** (id `48G8NAEGKuLnpgBo36bWHM`). Уточнено 2026-06-19 через Grist API (read-only) — там же лежат `Report_template`/`Report_last_filter` (см. §5) и каталог изделий `Basic_platforms`/`Parts`/`Modifications`/`Orders`/`Products` (см. §6). Старое указание на `lmp-test-dec.getgrist.com/5GtDphApyrjG` было устаревшим/неверным — не использовать.
-- **Текущая версия:** `v0.43.0`
+- **Текущая версия:** `v0.44.0`
 - **Стек:** один `index.html` (HTML + CSS + vanilla JS), `pdf.js` с CDN, `grist-plugin-api.js` с CDN.
 
 ---
@@ -86,6 +86,24 @@ export GRIST_API_KEY="..."
 ## 3. История изменений
 
 **Порядок: новые записи добавляются сверху, сразу после этого заголовка — самая последняя версия должна быть первой, самая старая — последней.** (До 2026-06-19 список был перемешан: записи до v0.11.0 шли по возрастанию, после — по убыванию; восстановлено руками один раз, дальше поддерживается этим правилом.)
+
+### v0.44.0 — feat: combobox-фильтры + ручной ввод автора + «Код изделия» вторым столбцом
+
+- Все 4 дропдауна (Базовое изделие, Партия, Исполнение, Заказ) заменены на combobox-поля:
+  `.fc` wrapper + `.fc-input` (text input) + `.fc-drop` (фиксированный list, `position:fixed`)
+  Набор текста фильтрует список; стрелки ↑↓ / Enter для навигации; Escape закрывает.
+  Dropdown добавляется в `<body>` через `document.createElement`, позиционируется через
+  `getBoundingClientRect()` чтобы не обрезаться overflow родителей.
+  `fillFilterCombo(fcId, items, currentValue, { showNone })` — аналог `fillFilterSelect`.
+  `setupFilterCombo(fcId, onChange)` — инициализация per-combo, вызывается в `bindEvents`.
+- Поле «Автор:» добавлено в filter bar (рядом с поиском): при изменении сохраняет имя в
+  `grist.setWidgetOptions({ authorName })` (персистентно для этого виджета).
+  `initGrist`: авто-обнаружение переработано — 3 уровня fallback:
+    1. `grist.getUserProfile()` (современный Grist)
+    2. REST `/api/profile/user` — сначала `?auth=TOKEN`, потом Bearer header
+    3. JWT decode (payload miniToken — если содержит name/email)
+  Если авто-обнаружение провалилось — загружается сохранённое имя из `grist.onOptions`.
+- Таблица результатов: «Код изделия» перемещён на второй столбец (после «Базовое изделие»)
 
 ### v0.43.0 — feat: «нет» в фильтре заказа + fix: поиск не сбрасывает дропдауны
 
