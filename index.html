@@ -528,7 +528,7 @@
 /* ====================================================================
    GLOBAL STATE
    ==================================================================== */
-const VERSION = 'v0.46.3';
+const VERSION = 'v0.46.4';
 
 // Grist table ids (service tables for templates / last-used filters).
 const TABLE_TEMPLATES = 'Report_template';
@@ -1639,16 +1639,20 @@ async function exportCalibrationFiles() {
       throw new Error('Токен не получен от Grist (getAccessToken вернул пустой результат)');
     }
 
-    // 4. Download files sequentially via direct <a href> link.
-    // Direct-link approach avoids CORS restrictions that block fetch() from an iframe.
-    // Sequential with 600ms delay prevents browser from treating it as popup flood.
+    // 4. Download files sequentially.
+    // <a target="_blank"> opens in a new tab so the browser never navigates
+    // the widget iframe itself (cross-origin navigation would show a login page).
+    // Standard Grist attachment URL: {baseUrl}/attachments/{id}/download?auth={token}
+    // — getAccessToken() tokens are designed for exactly this endpoint.
     sub.textContent = `0 / ${fileRecords.length}…`;
     for (let i = 0; i < fileRecords.length; i++) {
       const { fileId, label } = fileRecords[i];
       sub.textContent = `${i + 1} / ${fileRecords.length}…`;
-      const url = `https://db.mp-lab.ru/fileAPI/download/${encodeURIComponent(String(fileId))}?auth=${encodeURIComponent(tokenInfo.token)}`;
+      const url = `${tokenInfo.baseUrl}/attachments/${encodeURIComponent(String(fileId))}/download?auth=${encodeURIComponent(tokenInfo.token)}`;
       const a = document.createElement('a');
       a.href = url;
+      a.target = '_blank';
+      a.rel = 'noopener';
       a.download = `cc_${label}_${fileId}`;
       a.style.display = 'none';
       document.body.appendChild(a);

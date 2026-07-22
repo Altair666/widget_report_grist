@@ -87,6 +87,14 @@ export GRIST_API_KEY="..."
 
 **Порядок: новые записи добавляются сверху, сразу после этого заголовка — самая последняя версия должна быть первой, самая старая — последней.** (До 2026-06-19 список был перемешан: записи до v0.11.0 шли по возрастанию, после — по убыванию; восстановлено руками один раз, дальше поддерживается этим правилом.)
 
+### v0.46.4 — fix: download a.target='_blank' + стандартный Grist attachments URL
+
+- `<a>` без `target='_blank'` навигировал iframe виджета на URL файла → Grist
+  редиректил на страницу логина внутри виджета. Исправлено: `target='_blank'`.
+- URL изменён с `fileAPI/download/{id}?auth=` на стандартный Grist API:
+  `{baseUrl}/attachments/{id}/download?auth={token}` — совместим с токеном
+  из `getAccessToken`.
+
 ### v0.46.3 — fix: serial_number — это Reference, сравнение по row ID
 
 - `Product_files.serial_number` — Reference-колонка на Products → fetchTable
