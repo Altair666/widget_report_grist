@@ -64,6 +64,7 @@
     font-size: 12px;
   }
   .filter-chip .author { color: var(--muted); font-size: 11px; }
+  .fc-avatar { display:inline-flex; align-items:center; justify-content:center; width:22px; height:18px; border-radius:4px; color:#fff; font-size:10px; font-weight:700; font-family:inherit; flex-shrink:0; title-cursor:default; }
   .filter-chip .x { opacity: 0.5; cursor: pointer; }
   .filter-chip .x:hover { opacity: 1; color: var(--danger); }
   .filter-empty { color: var(--muted); font-style: italic; font-size: 12px; }
@@ -415,6 +416,10 @@
       <strong>Экспорт таблицы</strong>
       <span class="sub">CSV</span>
     </button>
+    <button class="ctl-btn" id="btn-export-cc">
+      <strong>Выгрузить коэффициенты</strong>
+      <span class="sub" id="btn-export-cc-sub">калибровочные файлы</span>
+    </button>
     <button class="ctl-btn" id="btn-print" disabled>
       <strong>Печать PDF</strong>
       <span class="sub">выберите шаблон</span>
@@ -522,7 +527,7 @@
 /* ====================================================================
    GLOBAL STATE
    ==================================================================== */
-const VERSION = 'v0.44.1';
+const VERSION = 'v0.45.0';
 
 // Grist table ids (service tables for templates / last-used filters).
 const TABLE_TEMPLATES = 'Report_template';
@@ -535,6 +540,20 @@ const TABLE_PARTS = 'Parts';
 const TABLE_MODIFICATIONS = 'Modifications';
 const TABLE_ORDERS = 'Orders';
 const TABLE_PRODUCTS = 'Products';
+const TABLE_PRODUCT_FILES = 'product_files';
+
+function avatarInitials(name) {
+  const words = (name || '').trim().split(/\s+/).filter(Boolean);
+  if (!words.length) return '?';
+  if (words.length >= 2) return (words[0][0] + words[words.length - 1][0]).toUpperCase();
+  return words[0].slice(0, 2).toUpperCase();
+}
+function avatarColor(name) {
+  let h = 0;
+  for (const c of (name || '')) h = (h * 31 + c.charCodeAt(0)) & 0xffff;
+  const hues = [210, 160, 280, 30, 0, 340, 190, 120, 60, 240];
+  return `hsl(${hues[h % hues.length]},58%,44%)`;
+}
 
 const state = {
   view: 'main',                 // 'main' | 'editor'
@@ -690,7 +709,7 @@ async function refreshLastFilters() {
     const list = (data.id || []).map((rowId, i) => ({
       _rowId: rowId,
       label: data.Label[i] || '',
-      author: data.Author[i] || '',
+      author: data.created_by[i] || '',
       batchValue: data.BatchValue[i] || '',
       orderValue: data.OrderValue[i] || '',
       searchValue: data.SearchValue[i] || '',
@@ -951,12 +970,17 @@ function renderLastFilters() {
     c.innerHTML = '<span class="filter-empty">Пока нет сохранённых фильтров</span>';
     return;
   }
-  c.innerHTML = list.map((f, i) => `
-    <div class="filter-chip" data-idx="${i}" title="Нажмите, чтобы применить этот фильтр" style="cursor:pointer;">
+  c.innerHTML = list.map((f, i) => {
+    const name = f.author || '';
+    const initials = avatarInitials(name);
+    const color = name ? avatarColor(name) : 'var(--muted)';
+    const tip = escapeHtml(name || 'Автор неизвестен');
+    return `<div class="filter-chip" data-idx="${i}" title="Нажмите, чтобы применить этот фильтр" style="cursor:pointer;">
+      <span class="fc-avatar" style="background:${color}" title="${tip}">${escapeHtml(initials)}</span>
       <span>${escapeHtml(f.label)}</span>
-      <span class="author">— ${escapeHtml(f.author || 'неизв.')}</span>
       <span class="x" data-act="del-filter" title="Удалить фильтр">✕</span>
-    </div>`).join('');
+    </div>`;
+  }).join('');
   c.querySelectorAll('.filter-chip').forEach(chip => {
     chip.addEventListener('click', () => reapplyLastFilter(Number(chip.dataset.idx)));
     chip.querySelector('[data-act="del-filter"]').addEventListener('click', ev => {
@@ -1548,6 +1572,102 @@ function exportCsv() {
 }
 
 /* ====================================================================
+   MAIN VIEW — EXPORT CALIBRATION FILES (CC)
+   ==================================================================== */
+async function exportCalibrationFiles() {
+  const selectedIds = [...state.selectedProductIds];
+  if (!selectedIds.length) {
+    toast('Выберите хотя бы одно изделие'); return;
+  }
+  if (!state.gristFull) {
+    toast('Требуется подключение к Grist'); return;
+  }
+
+  const btn = $('#btn-export-cc');
+  const sub = $('#btn-export-cc-sub');
+  btn.disabled = true;
+  sub.textContent = 'запрос…';
+
+  try {
+    // 1. Get serial numbers (product_code) for selected products
+    const products = state.catalog.products.filter(p => selectedIds.includes(p.id));
+    if (!products.length) { toast('Изделия не найдены в каталоге'); return; }
+    const serials = [...new Set(products.map(p => p.productCode).filter(Boolean))];
+
+    // 2. Query product_files via SQL — parameterized IN list to avoid injection
+    const tokenInfo = await withTimeout(grist.docApi.getAccessToken({ readOnly: true }), 5000);
+    const placeholders = serials.map(() => '?').join(', ');
+    const sql = `SELECT file_id, serial_number FROM ${TABLE_PRODUCT_FILES}
+                 WHERE file_type = 'cc' AND serial_number IN (${placeholders})`;
+    const res = await withTimeout(fetch(`${tokenInfo.baseUrl}/sql?auth=${tokenInfo.token}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sql, args: serials }),
+    }), 15000);
+    if (!res.ok) throw new Error(`SQL ${res.status}`);
+    const sqlData = await res.json();
+
+    const fileRecords = (sqlData.records || []).map(r => ({
+      fileId: r.fields.file_id,
+      serial: r.fields.serial_number,
+    })).filter(r => r.fileId);
+
+    if (!fileRecords.length) {
+      toast('Калибровочные файлы (cc) не найдены для выбранных изделий'); return;
+    }
+
+    // 3. Download files sequentially: fetch blob, then trigger download.
+    // Sequential (not parallel) avoids browser popup-blocker and filename collisions.
+    sub.textContent = `0 / ${fileRecords.length}…`;
+    let ok = 0, fail = 0;
+    for (let i = 0; i < fileRecords.length; i++) {
+      const { fileId, serial } = fileRecords[i];
+      sub.textContent = `${i + 1} / ${fileRecords.length}…`;
+      try {
+        // Fetch blob with Grist auth token (URL may be session-restricted)
+        const dlRes = await withTimeout(
+          fetch(`https://db.mp-lab.ru/fileAPI/download/${encodeURIComponent(fileId)}?auth=${tokenInfo.token}`),
+          30000
+        );
+        if (!dlRes.ok) throw new Error(`HTTP ${dlRes.status}`);
+        const blob = await dlRes.blob();
+
+        // Derive filename from Content-Disposition or fallback to serial_fileId
+        let filename = `cc_${serial}_${fileId}`;
+        const cd = dlRes.headers.get('Content-Disposition') || '';
+        const m = cd.match(/filename[^;=\n]*=\s*(?:UTF-8''|"?)([^";\n]+)/i);
+        if (m && m[1]) filename = decodeURIComponent(m[1].trim());
+
+        const blobUrl = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = blobUrl;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        // Small delay so browser can start the download before we revoke URL and start next
+        await new Promise(r => setTimeout(r, 400));
+        URL.revokeObjectURL(blobUrl);
+        ok++;
+      } catch (e) {
+        console.error(`CC download failed for fileId=${fileId}:`, e);
+        fail++;
+      }
+    }
+
+    toast(fail === 0
+      ? `Загружено ${ok} файл(ов)`
+      : `Загружено ${ok}, ошибок ${fail}`);
+  } catch (e) {
+    console.error('exportCalibrationFiles failed:', e);
+    toast('Ошибка при выгрузке калибровочных файлов');
+  } finally {
+    btn.disabled = false;
+    sub.textContent = 'калибровочные файлы';
+  }
+}
+
+/* ====================================================================
    MAIN VIEW — PRINT PDF (fonts embedded as WOFF base64, no CDN needed)
    ==================================================================== */
 // Montserrat subsets (WOFF/zlib, compatible with @pdf-lib/fontkit@1.1.1):
@@ -2112,6 +2232,7 @@ function bindEvents() {
     if (state.selectedTemplate) showEditor(state.selectedTemplate);
   });
   $('#btn-export').addEventListener('click', exportCsv);
+  $('#btn-export-cc').addEventListener('click', exportCalibrationFiles);
   $('#btn-print').addEventListener('click', printPdf);
 
   setupFilterCombo('bp-fc',    v => onProductFilterChange('basicPlatform', v));

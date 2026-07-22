@@ -10,7 +10,7 @@
 - **Репозиторий:** https://github.com/Altair666/widget_report_grist
 - **Live (GitHub Pages):** https://altair666.github.io/widget_report_grist/
 - **Целевой Grist-документ:** `db.mp-lab.ru`, организация `mp-lab`, документ **«LMP данные изделий»** (id `48G8NAEGKuLnpgBo36bWHM`). Уточнено 2026-06-19 через Grist API (read-only) — там же лежат `Report_template`/`Report_last_filter` (см. §5) и каталог изделий `Basic_platforms`/`Parts`/`Modifications`/`Orders`/`Products` (см. §6). Старое указание на `lmp-test-dec.getgrist.com/5GtDphApyrjG` было устаревшим/неверным — не использовать.
-- **Текущая версия:** `v0.44.1`
+- **Текущая версия:** `v0.45.0`
 - **Стек:** один `index.html` (HTML + CSS + vanilla JS), `pdf.js` с CDN, `grist-plugin-api.js` с CDN.
 
 ---
@@ -86,6 +86,24 @@ export GRIST_API_KEY="..."
 ## 3. История изменений
 
 **Порядок: новые записи добавляются сверху, сразу после этого заголовка — самая последняя версия должна быть первой, самая старая — последней.** (До 2026-06-19 список был перемешан: записи до v0.11.0 шли по возрастанию, после — по убыванию; восстановлено руками один раз, дальше поддерживается этим правилом.)
+
+### v0.45.0 — feat: аватар автора в чипах + кнопка выгрузки CC-файлов + created_by
+
+- Чипы «последние фильтры»: аватар (цветной кружок с 2 инициалами) вместо текста автора.
+  `avatarInitials(name)` — первая буква первого + первая буква последнего слова.
+  `avatarColor(name)` — детерминированный цвет из hsl-палитры (hash имени).
+- Колонка Author → created_by в Report_last_filter (обновлён `refreshLastFilters`).
+  Требуется переименовать колонку в Grist: Report_last_filter.Author → created_by.
+- Новая кнопка «Выгрузить коэффициенты» (между CSV и PDF):
+  - Работает на тех же выбранных чекбоксами изделиях
+  - SQL: `SELECT file_id, serial_number FROM product_files WHERE file_type='cc' AND serial_number IN (?...)`
+  - Скачивает файлы последовательно (400ms задержка) через fetch → Blob → object URL → <a>
+  - Авторизация: `?auth=TOKEN` query param (тот же паттерн что у SQL-запросов)
+  - Имя файла: из Content-Disposition или fallback `cc_{serial}_{fileId}`
+  - Нет коллизий: один скачанный файл → revoke URL → следующий. Blob-подход обходит
+    ограничения браузера на popup/параллельные downloads.
+  - Счётчик прогресса в sub-label кнопки (N / total…)
+  - TABLE_PRODUCT_FILES = 'product_files'
 
 ### v0.44.1 — fix: Author через Grist триггер-формулу, убран JS-детект пользователя
 
