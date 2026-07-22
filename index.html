@@ -418,8 +418,7 @@
       <span class="sub">CSV</span>
     </button>
     <button class="ctl-btn" id="btn-export-cc">
-      <strong>Выгрузить коэффициенты</strong>
-      <span class="sub" id="btn-export-cc-sub">калибровочные файлы</span>
+      <strong id="btn-export-cc-sub">Скачать калибровочные коэффициенты</strong>
     </button>
     <button class="ctl-btn" id="btn-print" disabled>
       <strong>Печать PDF</strong>
@@ -528,7 +527,7 @@
 /* ====================================================================
    GLOBAL STATE
    ==================================================================== */
-const VERSION = 'v0.47.0';
+const VERSION = 'v0.47.1';
 
 // Grist table ids (service tables for templates / last-used filters).
 const TABLE_TEMPLATES = 'Report_template';
@@ -1592,8 +1591,9 @@ async function exportCalibrationFiles() {
   }
 
   const btn = $('#btn-export-cc');
-  const sub = $('#btn-export-cc-sub');
+  const sub = $('#btn-export-cc-sub'); // the <strong> label
   btn.disabled = true;
+  const origLabel = sub.textContent;
   sub.textContent = 'запрос…';
 
   try {
@@ -1627,83 +1627,75 @@ async function exportCalibrationFiles() {
       toast('CC-файлы не найдены для выбранных изделий'); return;
     }
 
-    // 3. Try File System Access API (Chrome/Edge): user picks a folder once,
-    // all files are fetched and written there directly without per-file dialogs.
-    // Falls back to opening new tabs if FSA is unavailable or CORS blocks fetch.
-    if (typeof window.showDirectoryPicker === 'function') {
-      let dirHandle;
-      try {
-        dirHandle = await window.showDirectoryPicker({ mode: 'readwrite' });
-      } catch (e) {
-        if (e.name === 'AbortError') return; // user cancelled picker — stop entirely
-        dirHandle = null;
-      }
+    // 3. Get auth token for fetch (fileAPI may require it cross-origin)
+    let tokenInfo;
+    try {
+      tokenInfo = await withTimeout(grist.docApi.getAccessToken({ readOnly: true }), 5000);
+    } catch { /* try without token */ }
 
-      if (dirHandle) {
-        // Get auth token for cross-origin fetch to fileAPI
-        let tokenInfo;
-        try {
-          tokenInfo = await withTimeout(grist.docApi.getAccessToken({ readOnly: true }), 5000);
-        } catch { /* proceed without token — try unauthenticated */ }
-
-        let saved = 0, failed = 0;
-        for (let i = 0; i < fileRecords.length; i++) {
-          const { fileId, label } = fileRecords[i];
-          sub.textContent = `${i + 1} / ${fileRecords.length}…`;
-          try {
-            // Try fileAPI with auth token; if server doesn't need it the param is ignored
-            const fetchUrl = tokenInfo
-              ? `https://db.mp-lab.ru/fileAPI/download/${encodeURIComponent(String(fileId))}?auth=${encodeURIComponent(tokenInfo.token)}`
-              : `https://db.mp-lab.ru/fileAPI/download/${encodeURIComponent(String(fileId))}`;
-            const resp = await withTimeout(fetch(fetchUrl), 30000);
-            if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-            const blob = await resp.blob();
-
-            // Use Content-Disposition filename if server provides one
-            const cd = resp.headers.get('content-disposition') || '';
-            const fnMatch = cd.match(/filename\*?=(?:UTF-8''|"?)([^";\r\n]+)/i);
-            const filename = fnMatch
-              ? decodeURIComponent(fnMatch[1].replace(/"/g, '').trim())
-              : `cc_${label}_${fileId}`;
-
-            const fh = await dirHandle.getFileHandle(filename, { create: true });
-            const writable = await fh.createWritable();
-            await writable.write(blob);
-            await writable.close();
-            saved++;
-          } catch (fe) {
-            console.warn('FSA write failed for fileId', fileId, fe);
-            failed++;
-          }
-        }
-        const msg = failed
-          ? `Сохранено ${saved} файлов, ${failed} не удалось (CORS или ошибка сети)`
-          : `Сохранено ${saved} файлов в выбранную папку`;
-        toast(msg);
-        return;
-      }
-    }
-
-    // Fallback: open each file in a new tab (browser will show Save As dialog)
-    sub.textContent = `0 / ${fileRecords.length}…`;
+    // 4. Download via fetch → blob → <a download> click.
+    // Blob URL is always same-origin so the `download` attribute works and the
+    // browser saves directly to the Downloads folder without opening new tabs
+    // or showing per-file Save-As dialogs.
+    // Falls back to window.open if fetch is blocked by CORS.
+    let corsBlocked = false;
+    let downloaded = 0;
     for (let i = 0; i < fileRecords.length; i++) {
-      const { fileId } = fileRecords[i];
+      const { fileId, label } = fileRecords[i];
       sub.textContent = `${i + 1} / ${fileRecords.length}…`;
+
+      if (!corsBlocked) {
+        try {
+          const fetchUrl = tokenInfo
+            ? `https://db.mp-lab.ru/fileAPI/download/${encodeURIComponent(String(fileId))}?auth=${encodeURIComponent(tokenInfo.token)}`
+            : `https://db.mp-lab.ru/fileAPI/download/${encodeURIComponent(String(fileId))}`;
+          const resp = await withTimeout(fetch(fetchUrl), 30000);
+          if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+          const blob = await resp.blob();
+
+          // Prefer server-provided filename from Content-Disposition
+          const cd = resp.headers.get('content-disposition') || '';
+          const fnMatch = cd.match(/filename\*?=(?:UTF-8''|"?)([^";\r\n]+)/i);
+          const filename = fnMatch
+            ? decodeURIComponent(fnMatch[1].replace(/"/g, '').trim())
+            : `cc_${label}_${fileId}`;
+
+          const blobUrl = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = blobUrl;
+          a.download = filename;
+          a.style.display = 'none';
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          setTimeout(() => URL.revokeObjectURL(blobUrl), 10000);
+          downloaded++;
+          if (i < fileRecords.length - 1) await new Promise(r => setTimeout(r, 200));
+          continue;
+        } catch (fe) {
+          console.warn('fetch failed for fileId', fileId, fe);
+          // If first file fails it's likely CORS — switch to window.open for all remaining
+          if (i === 0) corsBlocked = true;
+        }
+      }
+
+      // CORS fallback: open in new tab
       window.open(
         `https://db.mp-lab.ru/fileAPI/download/${encodeURIComponent(String(fileId))}`,
         '_blank', 'noopener'
       );
-      if (i < fileRecords.length - 1) {
-        await new Promise(r => setTimeout(r, 600));
-      }
+      if (i < fileRecords.length - 1) await new Promise(r => setTimeout(r, 600));
     }
-    toast(`Открыто ${fileRecords.length} файл(ов) в новых вкладках`);
+
+    toast(corsBlocked
+      ? `Открыто ${fileRecords.length} файл(ов) в новых вкладках (CORS ограничение)`
+      : `Скачано ${downloaded} файл(ов)`);
   } catch (e) {
     console.error('exportCalibrationFiles failed:', e);
     toast('Ошибка: ' + (e && e.message ? e.message.slice(0, 100) : e));
   } finally {
     btn.disabled = false;
-    sub.textContent = 'калибровочные файлы';
+    sub.textContent = origLabel;
   }
 }
 
