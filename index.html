@@ -527,7 +527,7 @@
 /* ====================================================================
    GLOBAL STATE
    ==================================================================== */
-const VERSION = 'v0.47.3';
+const VERSION = 'v0.47.4';
 
 // Grist table ids (service tables for templates / last-used filters).
 const TABLE_TEMPLATES = 'Report_template';
@@ -1682,11 +1682,7 @@ async function exportCalibrationFiles() {
           if (i < fileRecords.length - 1) await new Promise(r => setTimeout(r, 300));
           continue;
         } catch (fe) {
-          console.warn('Grist attachment fetch failed for fileId', fileId, fe);
-          if (fetchWorks === null) {
-            // First file failed — show diagnostic toast and switch to window.open
-            toast(`Fetch не сработал: ${fe.message} — открываю в вкладках`, 6000);
-          }
+          console.warn('CC fetch failed for fileId', fileId, fe.message);
           fetchWorks = false;
         }
       }
