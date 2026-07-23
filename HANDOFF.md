@@ -10,7 +10,7 @@
 - **Репозиторий:** https://github.com/Altair666/widget_report_grist
 - **Live (GitHub Pages):** https://altair666.github.io/widget_report_grist/
 - **Целевой Grist-документ:** `db.mp-lab.ru`, организация `mp-lab`, документ **«LMP данные изделий»** (id `48G8NAEGKuLnpgBo36bWHM`). Уточнено 2026-06-19 через Grist API (read-only) — там же лежат `Report_template`/`Report_last_filter` (см. §5) и каталог изделий `Basic_platforms`/`Parts`/`Modifications`/`Orders`/`Products` (см. §6). Старое указание на `lmp-test-dec.getgrist.com/5GtDphApyrjG` было устаревшим/неверным — не использовать.
-- **Текущая версия:** `v0.46.0`
+- **Текущая версия:** `v0.48.0`
 - **Стек:** один `index.html` (HTML + CSS + vanilla JS), `pdf.js` с CDN, `grist-plugin-api.js` с CDN.
 
 ---
@@ -86,6 +86,17 @@ export GRIST_API_KEY="..."
 ## 3. История изменений
 
 **Порядок: новые записи добавляются сверху, сразу после этого заголовка — самая последняя версия должна быть первой, самая старая — последней.** (До 2026-06-19 список был перемешан: записи до v0.11.0 шли по возрастанию, после — по убыванию; восстановлено руками один раз, дальше поддерживается этим правилом.)
+
+### v0.48.0 — fix: ?auth= query param вместо Authorization заголовка для fetch
+
+- `Authorization: Bearer` заголовок → нестандартный запрос → preflight CORS →
+  сервер не включает `authorization` в `Access-Control-Allow-Headers` → блок.
+- `?auth=token` query param → простой GET без кастомных заголовков → preflight не
+  нужен → Grist возвращает `Access-Control-Allow-Origin` → fetch работает.
+- URL: `${tokenInfo.baseUrl}/attachments/${id}/download?auth=${token}` — стандартный
+  задокументированный способ для виджетов (per Grist help center + community).
+- Фолбэк: `window.open(fileAPI/download/{id})` если fetch не сработает.
+- Убран лишний toast про CORS-ошибку при первом файле.
 
 ### v0.47.2 — fix: Grist /api/ attachment endpoint для fetch (CORS)
 

@@ -527,7 +527,7 @@
 /* ====================================================================
    GLOBAL STATE
    ==================================================================== */
-const VERSION = 'v0.47.5';
+const VERSION = 'v0.48.0';
 
 // Grist table ids (service tables for templates / last-used filters).
 const TABLE_TEMPLATES = 'Report_template';
@@ -1634,37 +1634,26 @@ async function exportCalibrationFiles() {
     } catch { /* try without token */ }
 
     // 4. Download via fetch → blob → <a download> click.
-    // Blob URL is always same-origin so the `download` attribute works and the
-    // browser saves directly to the Downloads folder without opening new tabs
-    // or showing per-file Save-As dialogs.
-    // Standard Grist attachment API has CORS headers (same /api/ path as SQL).
-    // fileAPI/download is a custom path without CORS — only works via browser nav.
-    // Falls back to window.open (new tab) if fetch fails.
-    if (!tokenInfo) {
-      toast('Не удалось получить токен Grist'); return;
-    }
-    let fetchWorks = null; // determined on first file
+    // ?auth= query param = simple GET (no custom headers) → no CORS preflight →
+    // Grist returns Access-Control-Allow-Origin → fetch succeeds.
+    // Authorization: Bearer header triggers preflight → server rejects it → CORS error.
+    // Falls back to window.open (new tab + session cookie) if fetch fails.
+    let fetchWorks = null;
     let downloaded = 0;
     for (let i = 0; i < fileRecords.length; i++) {
       const { fileId, label } = fileRecords[i];
       sub.textContent = `${i + 1} / ${fileRecords.length}…`;
 
-      if (fetchWorks !== false) {
+      if (fetchWorks !== false && tokenInfo) {
         try {
-          // Use Authorization: Bearer header (non-simple request → triggers CORS
-          // preflight → Grist handles it correctly, same as SQL POST endpoint).
-          // ?auth= query param is a "simple" GET that skips preflight and gets
-          // blocked when the server omits CORS headers on the actual response.
-          const fetchUrl = `${tokenInfo.baseUrl}/attachments/${encodeURIComponent(String(fileId))}/download`;
+          const fetchUrl = `${tokenInfo.baseUrl}/attachments/${encodeURIComponent(String(fileId))}/download?auth=${encodeURIComponent(tokenInfo.token)}`;
           let resp;
           try {
-            resp = await withTimeout(fetch(fetchUrl, {
-              headers: { 'Authorization': `Bearer ${tokenInfo.token}` },
-            }), 30000);
+            resp = await withTimeout(fetch(fetchUrl), 30000);
           } catch (netErr) {
-            throw new Error(`Сеть/CORS: ${netErr.message}`);
+            throw new Error(`Сеть: ${netErr.message}`);
           }
-          if (!resp.ok) throw new Error(`HTTP ${resp.status} (fileId=${fileId})`);
+          if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
           const blob = await resp.blob();
 
           const cd = resp.headers.get('content-disposition') || '';
@@ -1688,12 +1677,11 @@ async function exportCalibrationFiles() {
           continue;
         } catch (fe) {
           console.warn('CC fetch failed for fileId', fileId, fe.message);
-          if (fetchWorks === null) toast(`Fetch: ${fe.message}`, 8000);
           fetchWorks = false;
         }
       }
 
-      // Fallback: open in new tab via original fileAPI URL (browser session auth)
+      // Fallback: open in new tab (browser session cookie auth)
       window.open(
         `https://db.mp-lab.ru/fileAPI/download/${encodeURIComponent(String(fileId))}`,
         '_blank', 'noopener'
@@ -1701,7 +1689,8 @@ async function exportCalibrationFiles() {
       if (i < fileRecords.length - 1) await new Promise(r => setTimeout(r, 600));
     }
 
-    if (fetchWorks !== false) toast(`Скачано ${downloaded} файл(ов)`);
+    if (fetchWorks === true) toast(`Скачано ${downloaded} файл(ов)`);
+    else if (fetchWorks === false) toast('Файлы открыты в новых вкладках');
   } catch (e) {
     console.error('exportCalibrationFiles failed:', e);
     toast('Ошибка: ' + (e && e.message ? e.message.slice(0, 100) : e));
