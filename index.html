@@ -527,7 +527,7 @@
 /* ====================================================================
    GLOBAL STATE
    ==================================================================== */
-const VERSION = 'v0.48.2';
+const VERSION = 'v0.48.3';
 
 // Grist table ids (service tables for templates / last-used filters).
 const TABLE_TEMPLATES = 'Report_template';
@@ -1644,30 +1644,22 @@ async function exportCalibrationFiles() {
         : `https://db.mp-lab.ru/fileAPI/download/${encodeURIComponent(String(fileId))}`
     );
 
-    const popupHtml = `<!DOCTYPE html><html><head><meta charset="UTF-8">
-<title>Скачивание CC-файлов</title>
-<style>body{font-family:sans-serif;padding:24px;color:#333}p{margin:0 0 12px}
-#st{font-size:1.1em;font-weight:bold}</style></head><body>
-<p>Скачивание калибровочных файлов…</p>
-<p id="st">Подготовка…</p>
-<script>
-var urls=${JSON.stringify(downloadUrls)};
-var i=0;
-var a=document.createElement('a');
-document.body.appendChild(a);
-function next(){
-  if(i>=urls.length){
-    document.getElementById('st').textContent='Готово ✓ ('+urls.length+' файл(ов))';
-    setTimeout(function(){window.close();},2000);
-    return;
-  }
-  document.getElementById('st').textContent=(i+1)+' / '+urls.length;
-  a.href=urls[i++];
-  a.click();
-  setTimeout(next,1500);
-}
-setTimeout(next,300);
-</script></body></html>`;
+    const popupHtml = '<!DOCTYPE html><html><head><meta charset="UTF-8">' +
+'<title>Скачивание CC-файлов</title>' +
+'<style>body{font-family:sans-serif;padding:24px;color:#333}p{margin:0 0 12px}' +
+'#st{font-size:1.1em;font-weight:bold}</style></head><body>' +
+'<p>Скачивание калибровочных файлов…</p>' +
+'<p id="st">Подготовка…</p>' +
+'<script>' +
+'var urls=' + JSON.stringify(downloadUrls) + ';' +
+'var i=0;var a=document.createElement("a");document.body.appendChild(a);' +
+'function next(){' +
+'  if(i>=urls.length){document.getElementById("st").textContent="Готово ✓ ("+urls.length+" файл(ов))";' +
+'  setTimeout(function(){window.close();},2000);return;}' +
+'  document.getElementById("st").textContent=(i+1)+" / "+urls.length;' +
+'  a.href=urls[i++];a.click();setTimeout(next,1500);}' +
+'setTimeout(next,300);' +
+'<\/script></body></html>';
 
     const popup = window.open('', '_blank', 'width=380,height=160,noopener=no');
     if (!popup) {
