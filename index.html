@@ -527,7 +527,7 @@
 /* ====================================================================
    GLOBAL STATE
    ==================================================================== */
-const VERSION = 'v0.48.3';
+const VERSION = 'v0.48.4';
 
 // Grist table ids (service tables for templates / last-used filters).
 const TABLE_TEMPLATES = 'Report_template';
@@ -1627,21 +1627,13 @@ async function exportCalibrationFiles() {
       toast('CC-файлы не найдены для выбранных изделий'); return;
     }
 
-    // 3. Get auth token for fetch (fileAPI may require it cross-origin)
-    let tokenInfo;
-    try {
-      tokenInfo = await withTimeout(grist.docApi.getAccessToken({ readOnly: true }), 5000);
-    } catch { /* try without token */ }
-
-    // 4. Single popup window — единственный обход CORS+CSP из cross-origin виджета.
+    // 3. Single popup window — единственный обход CORS+CSP из cross-origin виджета.
     // fetch → CORS-блок; iframe → CSP frame-ancestors 'self' блок.
     // Popup открывается один раз, внутри него скрипт кликает <a href> для каждого
     // файла. Клик по ссылке с Content-Disposition:attachment не уходит со страницы
     // → скрипт продолжает работать → все файлы скачиваются → окно закрывается.
     const downloadUrls = fileRecords.map(({ fileId }) =>
-      tokenInfo
-        ? `${tokenInfo.baseUrl}/attachments/${encodeURIComponent(String(fileId))}/download?auth=${encodeURIComponent(tokenInfo.token)}`
-        : `https://db.mp-lab.ru/fileAPI/download/${encodeURIComponent(String(fileId))}`
+      `https://db.mp-lab.ru/fileAPI/download/${encodeURIComponent(String(fileId))}`
     );
 
     const popupHtml = '<!DOCTYPE html><html><head><meta charset="UTF-8">' +
