@@ -527,7 +527,7 @@
 /* ====================================================================
    GLOBAL STATE
    ==================================================================== */
-const VERSION = 'v0.47.4';
+const VERSION = 'v0.47.5';
 
 // Grist table ids (service tables for templates / last-used filters).
 const TABLE_TEMPLATES = 'Report_template';
@@ -1651,11 +1651,16 @@ async function exportCalibrationFiles() {
 
       if (fetchWorks !== false) {
         try {
-          // Use standard Grist attachment endpoint — same /api/ root as SQL, CORS allowed
-          const fetchUrl = `${tokenInfo.baseUrl}/attachments/${encodeURIComponent(String(fileId))}/download?auth=${encodeURIComponent(tokenInfo.token)}`;
+          // Use Authorization: Bearer header (non-simple request → triggers CORS
+          // preflight → Grist handles it correctly, same as SQL POST endpoint).
+          // ?auth= query param is a "simple" GET that skips preflight and gets
+          // blocked when the server omits CORS headers on the actual response.
+          const fetchUrl = `${tokenInfo.baseUrl}/attachments/${encodeURIComponent(String(fileId))}/download`;
           let resp;
           try {
-            resp = await withTimeout(fetch(fetchUrl), 30000);
+            resp = await withTimeout(fetch(fetchUrl, {
+              headers: { 'Authorization': `Bearer ${tokenInfo.token}` },
+            }), 30000);
           } catch (netErr) {
             throw new Error(`Сеть/CORS: ${netErr.message}`);
           }
@@ -1683,6 +1688,7 @@ async function exportCalibrationFiles() {
           continue;
         } catch (fe) {
           console.warn('CC fetch failed for fileId', fileId, fe.message);
+          if (fetchWorks === null) toast(`Fetch: ${fe.message}`, 8000);
           fetchWorks = false;
         }
       }
