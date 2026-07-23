@@ -527,7 +527,7 @@
 /* ====================================================================
    GLOBAL STATE
    ==================================================================== */
-const VERSION = 'v0.48.1';
+const VERSION = 'v0.48.2';
 
 // Grist table ids (service tables for templates / last-used filters).
 const TABLE_TEMPLATES = 'Report_template';
@@ -1633,31 +1633,50 @@ async function exportCalibrationFiles() {
       tokenInfo = await withTimeout(grist.docApi.getAccessToken({ readOnly: true }), 5000);
     } catch { /* try without token */ }
 
-    // 4. Hidden iframe download — обходит CORS полностью.
-    // iframe-навигация не является XHR/fetch → браузер не проверяет CORS.
-    // ?auth=token принимается сервером → Content-Disposition: attachment →
-    // браузер скачивает файл в папку загрузок без новых вкладок и диалогов.
-    const baseForDownload = tokenInfo
-      ? tokenInfo.baseUrl
-      : null;
+    // 4. Single popup window — единственный обход CORS+CSP из cross-origin виджета.
+    // fetch → CORS-блок; iframe → CSP frame-ancestors 'self' блок.
+    // Popup открывается один раз, внутри него скрипт кликает <a href> для каждого
+    // файла. Клик по ссылке с Content-Disposition:attachment не уходит со страницы
+    // → скрипт продолжает работать → все файлы скачиваются → окно закрывается.
+    const downloadUrls = fileRecords.map(({ fileId }) =>
+      tokenInfo
+        ? `${tokenInfo.baseUrl}/attachments/${encodeURIComponent(String(fileId))}/download?auth=${encodeURIComponent(tokenInfo.token)}`
+        : `https://db.mp-lab.ru/fileAPI/download/${encodeURIComponent(String(fileId))}`
+    );
 
-    for (let i = 0; i < fileRecords.length; i++) {
-      const { fileId } = fileRecords[i];
-      sub.textContent = `${i + 1} / ${fileRecords.length}…`;
+    const popupHtml = `<!DOCTYPE html><html><head><meta charset="UTF-8">
+<title>Скачивание CC-файлов</title>
+<style>body{font-family:sans-serif;padding:24px;color:#333}p{margin:0 0 12px}
+#st{font-size:1.1em;font-weight:bold}</style></head><body>
+<p>Скачивание калибровочных файлов…</p>
+<p id="st">Подготовка…</p>
+<script>
+var urls=${JSON.stringify(downloadUrls)};
+var i=0;
+var a=document.createElement('a');
+document.body.appendChild(a);
+function next(){
+  if(i>=urls.length){
+    document.getElementById('st').textContent='Готово ✓ ('+urls.length+' файл(ов))';
+    setTimeout(function(){window.close();},2000);
+    return;
+  }
+  document.getElementById('st').textContent=(i+1)+' / '+urls.length;
+  a.href=urls[i++];
+  a.click();
+  setTimeout(next,1500);
+}
+setTimeout(next,300);
+</script></body></html>`;
 
-      const url = baseForDownload
-        ? `${baseForDownload}/attachments/${encodeURIComponent(String(fileId))}/download?auth=${encodeURIComponent(tokenInfo.token)}`
-        : `https://db.mp-lab.ru/fileAPI/download/${encodeURIComponent(String(fileId))}`;
-
-      const iframe = document.createElement('iframe');
-      iframe.style.cssText = 'display:none;width:0;height:0;border:none;position:absolute;';
-      document.body.appendChild(iframe);
-      iframe.src = url;
-      setTimeout(() => { try { document.body.removeChild(iframe); } catch {} }, 60000);
-
-      if (i < fileRecords.length - 1) await new Promise(r => setTimeout(r, 600));
+    const popup = window.open('', '_blank', 'width=380,height=160,noopener=no');
+    if (!popup) {
+      toast('Браузер заблокировал всплывающее окно — разрешите для этого сайта', 6000);
+      return;
     }
-
+    popup.document.open();
+    popup.document.write(popupHtml);
+    popup.document.close();
     toast(`Скачивание ${fileRecords.length} файл(ов) запущено`);
   } catch (e) {
     console.error('exportCalibrationFiles failed:', e);

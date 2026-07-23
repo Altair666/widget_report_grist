@@ -10,7 +10,7 @@
 - **Репозиторий:** https://github.com/Altair666/widget_report_grist
 - **Live (GitHub Pages):** https://altair666.github.io/widget_report_grist/
 - **Целевой Grist-документ:** `db.mp-lab.ru`, организация `mp-lab`, документ **«LMP данные изделий»** (id `48G8NAEGKuLnpgBo36bWHM`). Уточнено 2026-06-19 через Grist API (read-only) — там же лежат `Report_template`/`Report_last_filter` (см. §5) и каталог изделий `Basic_platforms`/`Parts`/`Modifications`/`Orders`/`Products` (см. §6). Старое указание на `lmp-test-dec.getgrist.com/5GtDphApyrjG` было устаревшим/неверным — не использовать.
-- **Текущая версия:** `v0.48.1`
+- **Текущая версия:** `v0.48.2`
 - **Стек:** один `index.html` (HTML + CSS + vanilla JS), `pdf.js` с CDN, `grist-plugin-api.js` с CDN.
 
 ---
@@ -86,6 +86,16 @@ export GRIST_API_KEY="..."
 ## 3. История изменений
 
 **Порядок: новые записи добавляются сверху, сразу после этого заголовка — самая последняя версия должна быть первой, самая старая — последней.** (До 2026-06-19 список был перемешан: записи до v0.11.0 шли по возрастанию, после — по убыванию; восстановлено руками один раз, дальше поддерживается этим правилом.)
+
+### v0.48.2 — fix: single popup window вместо iframe (CSP frame-ancestors блокирует iframe)
+
+- iframe → CSP frame-ancestors 'self' на db.mp-lab.ru → блок.
+- Решение: одно всплывающее окно с встроенным скриптом.
+  Скрипт кликает <a href> для каждого файла. Клик с Content-Disposition:attachment
+  не уходит со страницы → скрипт продолжает работать → все файлы скачаны →
+  окно само закрывается через 2с. Итого: одно окно вместо N окон.
+- Auth: ?auth=token через Grist API URL (с фолбэком на fileAPI без токена).
+- ВАЖНО: браузер должен разрешать всплывающие окна для altair666.github.io.
 
 ### v0.48.1 — fix: hidden iframe вместо fetch для обхода CORS
 
