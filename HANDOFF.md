@@ -10,7 +10,7 @@
 - **Репозиторий:** https://github.com/Altair666/widget_report_grist
 - **Live (GitHub Pages):** https://altair666.github.io/widget_report_grist/
 - **Целевой Grist-документ:** `db.mp-lab.ru`, организация `mp-lab`, документ **«LMP данные изделий»** (id `48G8NAEGKuLnpgBo36bWHM`). Уточнено 2026-06-19 через Grist API (read-only) — там же лежат `Report_template`/`Report_last_filter` (см. §5) и каталог изделий `Basic_platforms`/`Parts`/`Modifications`/`Orders`/`Products` (см. §6). Старое указание на `lmp-test-dec.getgrist.com/5GtDphApyrjG` было устаревшим/неверным — не использовать.
-- **Текущая версия:** `v0.48.0`
+- **Текущая версия:** `v0.48.1`
 - **Стек:** один `index.html` (HTML + CSS + vanilla JS), `pdf.js` с CDN, `grist-plugin-api.js` с CDN.
 
 ---
@@ -86,6 +86,15 @@ export GRIST_API_KEY="..."
 ## 3. История изменений
 
 **Порядок: новые записи добавляются сверху, сразу после этого заголовка — самая последняя версия должна быть первой, самая старая — последней.** (До 2026-06-19 список был перемешан: записи до v0.11.0 шли по возрастанию, после — по убыванию; восстановлено руками один раз, дальше поддерживается этим правилом.)
+
+### v0.48.1 — fix: hidden iframe вместо fetch для обхода CORS
+
+- fetch() CORS-блокируется со стороны браузера независимо от способа передачи токена
+  (и ?auth=, и Authorization: Bearer не работают из cross-origin виджета).
+- Новый подход: скрытый <iframe src="...?auth=token"> — iframe-навигация не является
+  XHR/fetch, CORS не проверяется. Сервер принимает ?auth=, отвечает с
+  Content-Disposition: attachment → браузер скачивает в Downloads без новых вкладок.
+- Убрана вся логика fetch+blob, fetchWorks-флаг, window.open-фолбэк.
 
 ### v0.48.0 — fix: ?auth= query param вместо Authorization заголовка для fetch
 

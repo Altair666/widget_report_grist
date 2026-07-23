@@ -527,7 +527,7 @@
 /* ====================================================================
    GLOBAL STATE
    ==================================================================== */
-const VERSION = 'v0.48.0';
+const VERSION = 'v0.48.1';
 
 // Grist table ids (service tables for templates / last-used filters).
 const TABLE_TEMPLATES = 'Report_template';
@@ -1633,64 +1633,32 @@ async function exportCalibrationFiles() {
       tokenInfo = await withTimeout(grist.docApi.getAccessToken({ readOnly: true }), 5000);
     } catch { /* try without token */ }
 
-    // 4. Download via fetch → blob → <a download> click.
-    // ?auth= query param = simple GET (no custom headers) → no CORS preflight →
-    // Grist returns Access-Control-Allow-Origin → fetch succeeds.
-    // Authorization: Bearer header triggers preflight → server rejects it → CORS error.
-    // Falls back to window.open (new tab + session cookie) if fetch fails.
-    let fetchWorks = null;
-    let downloaded = 0;
+    // 4. Hidden iframe download — обходит CORS полностью.
+    // iframe-навигация не является XHR/fetch → браузер не проверяет CORS.
+    // ?auth=token принимается сервером → Content-Disposition: attachment →
+    // браузер скачивает файл в папку загрузок без новых вкладок и диалогов.
+    const baseForDownload = tokenInfo
+      ? tokenInfo.baseUrl
+      : null;
+
     for (let i = 0; i < fileRecords.length; i++) {
-      const { fileId, label } = fileRecords[i];
+      const { fileId } = fileRecords[i];
       sub.textContent = `${i + 1} / ${fileRecords.length}…`;
 
-      if (fetchWorks !== false && tokenInfo) {
-        try {
-          const fetchUrl = `${tokenInfo.baseUrl}/attachments/${encodeURIComponent(String(fileId))}/download?auth=${encodeURIComponent(tokenInfo.token)}`;
-          let resp;
-          try {
-            resp = await withTimeout(fetch(fetchUrl), 30000);
-          } catch (netErr) {
-            throw new Error(`Сеть: ${netErr.message}`);
-          }
-          if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-          const blob = await resp.blob();
+      const url = baseForDownload
+        ? `${baseForDownload}/attachments/${encodeURIComponent(String(fileId))}/download?auth=${encodeURIComponent(tokenInfo.token)}`
+        : `https://db.mp-lab.ru/fileAPI/download/${encodeURIComponent(String(fileId))}`;
 
-          const cd = resp.headers.get('content-disposition') || '';
-          const fnMatch = cd.match(/filename\*?=(?:UTF-8''|"?)([^";\r\n]+)/i);
-          const filename = fnMatch
-            ? decodeURIComponent(fnMatch[1].replace(/"/g, '').trim())
-            : `cc_${label}_${fileId}`;
+      const iframe = document.createElement('iframe');
+      iframe.style.cssText = 'display:none;width:0;height:0;border:none;position:absolute;';
+      document.body.appendChild(iframe);
+      iframe.src = url;
+      setTimeout(() => { try { document.body.removeChild(iframe); } catch {} }, 60000);
 
-          const blobUrl = URL.createObjectURL(blob);
-          const a = document.createElement('a');
-          a.href = blobUrl;
-          a.download = filename;
-          a.style.display = 'none';
-          document.body.appendChild(a);
-          a.click();
-          document.body.removeChild(a);
-          setTimeout(() => URL.revokeObjectURL(blobUrl), 10000);
-          fetchWorks = true;
-          downloaded++;
-          if (i < fileRecords.length - 1) await new Promise(r => setTimeout(r, 300));
-          continue;
-        } catch (fe) {
-          console.warn('CC fetch failed for fileId', fileId, fe.message);
-          fetchWorks = false;
-        }
-      }
-
-      // Fallback: open in new tab (browser session cookie auth)
-      window.open(
-        `https://db.mp-lab.ru/fileAPI/download/${encodeURIComponent(String(fileId))}`,
-        '_blank', 'noopener'
-      );
       if (i < fileRecords.length - 1) await new Promise(r => setTimeout(r, 600));
     }
 
-    if (fetchWorks === true) toast(`Скачано ${downloaded} файл(ов)`);
-    else if (fetchWorks === false) toast('Файлы открыты в новых вкладках');
+    toast(`Скачивание ${fileRecords.length} файл(ов) запущено`);
   } catch (e) {
     console.error('exportCalibrationFiles failed:', e);
     toast('Ошибка: ' + (e && e.message ? e.message.slice(0, 100) : e));
