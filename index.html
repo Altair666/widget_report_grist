@@ -370,9 +370,88 @@
     background: rgba(255,255,255,0.7); border: 1px solid var(--border); padding: 1px 6px; border-radius: 3px;
     pointer-events: none; z-index: 50;
   }
+
+  /* --- Settings gear button --- */
+  #btn-settings {
+    position: fixed; top: 8px; right: 8px; z-index: 180;
+    width: 28px; height: 28px; padding: 0;
+    background: var(--panel); border: 1px solid var(--border); border-radius: 6px;
+    cursor: pointer; display: flex; align-items: center; justify-content: center;
+    color: var(--muted); font-size: 15px; line-height: 1;
+    transition: background 0.15s, color 0.15s;
+  }
+  #btn-settings:hover { background: #eceef0; color: #222; }
+
+  /* --- Settings slide-over panel --- */
+  #settings-overlay {
+    position: fixed; inset: 0; background: rgba(0,0,0,.15); display: none; z-index: 190;
+  }
+  #settings-overlay.on { display: block; }
+  #settings-panel {
+    position: fixed; top: 0; right: 0; bottom: 0; width: min(360px,100%);
+    background: var(--panel); border-left: 1px solid var(--border);
+    box-shadow: -4px 0 12px rgba(0,0,0,.1);
+    display: none; flex-direction: column; z-index: 200;
+  }
+  #settings-panel.on { display: flex; }
+  #settings-panel .sp-head {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 10px 14px; border-bottom: 1px solid var(--border); flex-shrink: 0;
+    font-weight: 600; font-size: 14px;
+  }
+  #settings-panel .sp-body { flex: 1; overflow-y: auto; padding: 14px; display: flex; flex-direction: column; gap: 12px; }
+  #settings-panel .sp-foot {
+    padding: 10px 14px; border-top: 1px solid var(--border);
+    display: flex; justify-content: flex-end; gap: 8px; flex-shrink: 0;
+  }
+  .sp-field { display: flex; flex-direction: column; gap: 4px; }
+  .sp-field label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.4px; }
+  .sp-field input { font-size: 13px; padding: 5px 8px; border: 1px solid var(--border); border-radius: 5px; background: var(--bg); color: inherit; }
+  .sp-field input:focus { outline: 2px solid #2f6feb; outline-offset: -1px; }
+  .sp-hint { font-size: 11px; color: var(--muted); }
+  .sp-close { background: none; border: none; font-size: 18px; cursor: pointer; color: var(--muted); line-height: 1; padding: 0 2px; }
+  .sp-close:hover { color: #222; }
+  .btn-secondary { background: var(--panel); border: 1px solid var(--border); border-radius: 5px; padding: 5px 14px; cursor: pointer; font-size: 13px; }
+  .btn-primary   { background: #2f6feb; border: 1px solid #2f6feb; border-radius: 5px; padding: 5px 14px; cursor: pointer; font-size: 13px; color: #fff; }
+  .btn-secondary:hover { background: #eceef0; }
+  .btn-primary:hover   { background: #1a56d6; }
+
+  /* --- Sync button state --- */
+  #btn-sync.syncing { opacity: 0.7; pointer-events: none; }
 </style>
 </head>
 <body>
+
+<!-- Gear button -->
+<button id="btn-settings" title="Настройки виджета">⚙</button>
+
+<!-- Settings overlay + panel -->
+<div id="settings-overlay"></div>
+<div id="settings-panel">
+  <div class="sp-head">
+    <span>Настройки виджета</span>
+    <button class="sp-close" id="settings-close">&times;</button>
+  </div>
+  <div class="sp-body">
+    <div class="sp-field">
+      <label>Server URL</label>
+      <input type="url" id="s-server-url" placeholder="https://your-server.example.com" />
+    </div>
+    <div class="sp-field">
+      <label>API Key</label>
+      <input type="password" id="s-api-key" placeholder="••••••••" />
+    </div>
+    <div class="sp-field">
+      <label>Endpoint</label>
+      <input type="text" id="s-endpoint" placeholder="/api/grist/labels/upsert" />
+      <span class="sp-hint">Эндпоинт для синхронизации этикеток</span>
+    </div>
+  </div>
+  <div class="sp-foot">
+    <button class="btn-secondary" id="settings-cancel">Отмена</button>
+    <button class="btn-primary" id="settings-save">Сохранить</button>
+  </div>
+</div>
 
 <!-- =================  MAIN VIEW  ================= -->
 <div id="main-view">
@@ -413,9 +492,9 @@
       <strong>Редактировать шаблон</strong>
       <span class="sub">выберите шаблон</span>
     </button>
-    <button class="ctl-btn" id="btn-export">
-      <strong>Экспорт таблицы</strong>
-      <span class="sub">CSV</span>
+    <button class="ctl-btn" id="btn-sync">
+      <strong>Синхронизация</strong>
+      <span class="sub" id="btn-sync-sub">выберите изделия</span>
     </button>
     <button class="ctl-btn" id="btn-export-cc">
       <strong id="btn-export-cc-sub">Скачать калибровочные коэффициенты</strong>
@@ -527,7 +606,7 @@
 /* ====================================================================
    GLOBAL STATE
    ==================================================================== */
-const VERSION = 'v0.48.5';
+const VERSION = 'v0.49.0';
 
 // Grist table ids (service tables for templates / last-used filters).
 const TABLE_TEMPLATES = 'Report_template';
@@ -578,6 +657,7 @@ const state = {
   bpOptions: { modeIds: new Set(), orderIds: new Set() }, // distinct mode/order IDs for selected BP
   otkPerson: 'Л.Р. Боев',
   otkRole: 'Начальник ОТК',
+  syncSettings: { serverUrl: '', apiKey: '', endpoint: '/api/grist/labels/upsert' },
 };
 
 /* PDF.js worker */
@@ -1495,6 +1575,7 @@ function bindResultRowCheckboxes() {
       const id = Number(cb.dataset.id);
       if (cb.checked) state.selectedProductIds.add(id); else state.selectedProductIds.delete(id);
       updateSelectAllCheckbox();
+      updateSyncButton();
     });
   });
   const all = $('#select-all-rows');
@@ -1504,6 +1585,7 @@ function bindResultRowCheckboxes() {
       if (all.checked) visibleIds.forEach(id => state.selectedProductIds.add(id));
       else visibleIds.forEach(id => state.selectedProductIds.delete(id));
       renderProductResults();
+      updateSyncButton();
     });
   }
   updateSelectAllCheckbox();
@@ -2228,6 +2310,96 @@ function updateOtkDisplays() {
 }
 
 /* ====================================================================
+   SETTINGS PANEL
+   ==================================================================== */
+function openSettings() {
+  $('#s-server-url').value = state.syncSettings.serverUrl;
+  $('#s-api-key').value    = state.syncSettings.apiKey;
+  $('#s-endpoint').value   = state.syncSettings.endpoint || '/api/grist/labels/upsert';
+  $('#settings-overlay').classList.add('on');
+  $('#settings-panel').classList.add('on');
+}
+function closeSettings() {
+  $('#settings-overlay').classList.remove('on');
+  $('#settings-panel').classList.remove('on');
+}
+function saveSettings() {
+  const s = {
+    serverUrl: $('#s-server-url').value.trim().replace(/\/$/, ''),
+    apiKey:    $('#s-api-key').value.trim(),
+    endpoint:  $('#s-endpoint').value.trim() || '/api/grist/labels/upsert',
+  };
+  state.syncSettings = s;
+  if (window.grist) {
+    grist.setOption('syncServerUrl', s.serverUrl);
+    grist.setOption('syncApiKey',    s.apiKey);
+    grist.setOption('syncEndpoint',  s.endpoint);
+  }
+  closeSettings();
+  updateSyncButton();
+  toast('Настройки сохранены');
+}
+function updateSyncButton() {
+  const configured = !!state.syncSettings.serverUrl;
+  const sub = $('#btn-sync-sub');
+  if (!configured) { sub.textContent = 'настройте сервер ⚙'; return; }
+  const n = state.selectedProductIds.size;
+  sub.textContent = n ? `${n} изделий` : 'выберите изделия';
+}
+
+/* ====================================================================
+   SYNC — POST selected products to external SQLite proxy
+   ==================================================================== */
+async function syncLabels() {
+  const { serverUrl, apiKey, endpoint } = state.syncSettings;
+  if (!serverUrl) { openSettings(); return; }
+
+  const selectedIds = [...state.selectedProductIds];
+  if (!selectedIds.length) { toast('Выберите хотя бы одно изделие'); return; }
+
+  const modMap = new Map(state.catalog.modifications.map(m => [m.id, m]));
+  const dateText = formatRuDate(state.selectedDate || new Date());
+
+  const items = state.catalog.products
+    .filter(p => state.selectedProductIds.has(p.id))
+    .map(p => ({
+      date:         dateText,
+      product_code: p.productCode || '',
+      mode_code:    modMap.get(p.modeId)?.code || '',
+    }));
+
+  const btn = $('#btn-sync');
+  const sub = $('#btn-sync-sub');
+  btn.classList.add('syncing');
+  const origSub = sub.textContent;
+  sub.textContent = 'отправка…';
+
+  try {
+    const url = serverUrl + endpoint;
+    const resp = await withTimeout(fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({ items }),
+    }), 30000);
+
+    if (!resp.ok) {
+      const text = await resp.text().catch(() => '');
+      throw new Error(`HTTP ${resp.status}${text ? ': ' + text.slice(0, 120) : ''}`);
+    }
+    toast(`Синхронизировано ${items.length} изделий`);
+  } catch (e) {
+    console.error('syncLabels failed:', e);
+    toast('Ошибка синхронизации: ' + (e?.message || e).slice(0, 100), 6000);
+  } finally {
+    btn.classList.remove('syncing');
+    sub.textContent = origSub;
+  }
+}
+
+/* ====================================================================
    EVENT BINDING
    ==================================================================== */
 function bindEvents() {
@@ -2236,8 +2408,13 @@ function bindEvents() {
   $('#btn-edit-tpl').addEventListener('click', () => {
     if (state.selectedTemplate) showEditor(state.selectedTemplate);
   });
-  $('#btn-export').addEventListener('click', exportCsv);
+  $('#btn-sync').addEventListener('click', syncLabels);
   $('#btn-export-cc').addEventListener('click', exportCalibrationFiles);
+  $('#btn-settings').addEventListener('click', openSettings);
+  $('#settings-close').addEventListener('click', closeSettings);
+  $('#settings-cancel').addEventListener('click', closeSettings);
+  $('#settings-save').addEventListener('click', saveSettings);
+  $('#settings-overlay').addEventListener('click', closeSettings);
   $('#btn-print').addEventListener('click', printPdf);
 
   setupFilterCombo('bp-fc',    v => onProductFilterChange('basicPlatform', v));
@@ -2292,8 +2469,15 @@ async function initGrist() {
     grist.ready({ requiredAccess: 'full' });
     state.gristFull = true;
 
-    // Author column in Report_last_filter is filled server-side via Grist
-    // trigger formula ($Author = user.Name) — no JS detection needed.
+    grist.onOptions(opts => {
+      if (!opts) return;
+      state.syncSettings = {
+        serverUrl: opts.syncServerUrl || '',
+        apiKey:    opts.syncApiKey    || '',
+        endpoint:  opts.syncEndpoint  || '/api/grist/labels/upsert',
+      };
+      updateSyncButton();
+    });
   }
 
   await refreshTemplates();

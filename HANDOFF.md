@@ -10,7 +10,7 @@
 - **Репозиторий:** https://github.com/Altair666/widget_report_grist
 - **Live (GitHub Pages):** https://altair666.github.io/widget_report_grist/
 - **Целевой Grist-документ:** `db.mp-lab.ru`, организация `mp-lab`, документ **«LMP данные изделий»** (id `48G8NAEGKuLnpgBo36bWHM`). Уточнено 2026-06-19 через Grist API (read-only) — там же лежат `Report_template`/`Report_last_filter` (см. §5) и каталог изделий `Basic_platforms`/`Parts`/`Modifications`/`Orders`/`Products` (см. §6). Старое указание на `lmp-test-dec.getgrist.com/5GtDphApyrjG` было устаревшим/неверным — не использовать.
-- **Текущая версия:** `v0.48.2`
+- **Текущая версия:** `v0.49.0`
 - **Стек:** один `index.html` (HTML + CSS + vanilla JS), `pdf.js` с CDN, `grist-plugin-api.js` с CDN.
 
 ---
@@ -86,6 +86,18 @@ export GRIST_API_KEY="..."
 ## 3. История изменений
 
 **Порядок: новые записи добавляются сверху, сразу после этого заголовка — самая последняя версия должна быть первой, самая старая — последней.** (До 2026-06-19 список был перемешан: записи до v0.11.0 шли по возрастанию, после — по убыванию; восстановлено руками один раз, дальше поддерживается этим правилом.)
+
+### v0.49.0 — feat: кнопка «Синхронизация» + шестерёнка настроек
+
+- Кнопка «Экспорт таблицы / CSV» переименована в «Синхронизация».
+  POST на внешний сервер (SQLite-прокси): { items: [{ date, product_code, mode_code }] }.
+  date = formatRuDate() («август 2026»), product_code = Products.product_code,
+  mode_code = Modifications.mode_code для выбранных изделий.
+  Auth: Authorization: Bearer {apiKey}.
+- Шестерёнка ⚙ (fixed, правый верхний угол) открывает панель настроек:
+  Server URL / API Key / Endpoint (default /api/grist/labels/upsert).
+  Настройки хранятся через grist.setOption / grist.onOptions.
+- Подпись кнопки показывает кол-во выбранных изделий или «настройте сервер ⚙».
 
 ### v0.48.2 — fix: single popup window вместо iframe (CSP frame-ancestors блокирует iframe)
 
