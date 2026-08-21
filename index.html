@@ -53,10 +53,7 @@
     max-height: 140px;
     overflow-y: auto;
   }
-  #last-filters h3 {
-    margin: 0 0 6px; font-size: 13px; color: var(--muted);
-    text-transform: uppercase; letter-spacing: 0.5px;
-  }
+  /* #last-filters h3 — moved to .lf-header h3 */
   .filter-chip {
     display: inline-flex; align-items: center; gap: 6px;
     background: #eef3ff; border: 1px solid #c8d6f5;
@@ -371,16 +368,22 @@
     pointer-events: none; z-index: 50;
   }
 
-  /* --- Settings gear button --- */
+  /* --- Settings gear button (inside #last-filters header) --- */
   #btn-settings {
-    position: fixed; top: 8px; right: 8px; z-index: 180;
-    width: 28px; height: 28px; padding: 0;
-    background: var(--panel); border: 1px solid var(--border); border-radius: 6px;
+    width: 26px; height: 26px; padding: 0; flex-shrink: 0;
+    background: transparent; border: none; border-radius: 5px;
     cursor: pointer; display: flex; align-items: center; justify-content: center;
     color: var(--muted); font-size: 15px; line-height: 1;
     transition: background 0.15s, color 0.15s;
   }
   #btn-settings:hover { background: #eceef0; color: #222; }
+
+  /* --- Last-filters header row (h3 + gear) --- */
+  .lf-header {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 6px;
+  }
+  .lf-header h3 { margin: 0; font-size: 13px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; }
 
   /* --- Settings slide-over panel --- */
   #settings-overlay {
@@ -422,9 +425,6 @@
 </head>
 <body>
 
-<!-- Gear button -->
-<button id="btn-settings" title="Настройки виджета">⚙</button>
-
 <!-- Settings overlay + panel -->
 <div id="settings-overlay"></div>
 <div id="settings-panel">
@@ -457,7 +457,10 @@
 <div id="main-view">
 
   <div class="panel" id="last-filters">
-    <h3>Последние использованные фильтры</h3>
+    <div class="lf-header">
+      <h3>Последние использованные фильтры</h3>
+      <button id="btn-settings" title="Настройки виджета">⚙</button>
+    </div>
     <div id="last-filters-list"><span class="filter-empty">Пока нет сохранённых фильтров</span></div>
   </div>
 
@@ -606,7 +609,7 @@
 /* ====================================================================
    GLOBAL STATE
    ==================================================================== */
-const VERSION = 'v0.49.0';
+const VERSION = 'v0.50.0';
 
 // Grist table ids (service tables for templates / last-used filters).
 const TABLE_TEMPLATES = 'Report_template';
