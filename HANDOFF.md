@@ -10,9 +10,9 @@
 - **Репозиторий:** https://github.com/Altair666/widget_report_grist
 - **Live (GitHub Pages):** https://altair666.github.io/widget_report_grist/
 - **Целевой Grist-документ:** `db.mp-lab.ru`, организация `mp-lab`, документ **«LMP данные изделий»** (id `48G8NAEGKuLnpgBo36bWHM`). Уточнено 2026-06-19 через Grist API (read-only) — там же лежат `Report_template`/`Report_last_filter` (см. §5) и каталог изделий `Basic_platforms`/`Parts`/`Modifications`/`Orders`/`Products` (см. §6). Старое указание на `lmp-test-dec.getgrist.com/5GtDphApyrjG` было устаревшим/неверным — не использовать.
-- **Текущая версия:** `v0.51.0`
+- **Текущая версия:** `v0.53.0`
 - **Стек:** один `index.html` (HTML + CSS + vanilla JS), библиотеки bundled в `vendor/` (pdf.js 3.11.174, pdf-lib 1.17.1, fontkit 1.1.1), `grist-plugin-api.js` с `db.mp-lab.ru` (внутренняя сеть, не трогать).
-- **Сервис синхронизации (2026-10):** GGA1C.Sync (Altair666/Jumper-GGA1C, стенд http://192.168.88.238:5080). Контракт: POST `{"items":[{date,product_code,mode_code,external_id,...}]}`, ключ в `Authorization: Bearer`. Endpoint по умолчанию `/api/grist/labels/replace-all` (replace-all = одна партия; upsert = накопление).
+- **Сервис синхронизации (2026-10):** GGA1C.Sync (Altair666/Jumper-GGA1C, стенд http://192.168.88.238:5080). Контракт: POST `{"items":[{date,product_code,mode_code,external_id,...}]}`. Auth через Keycloak PKCE (`X-Keycloak-Token: <id_token>`) или fallback `Authorization: Bearer <apiKey>`. Endpoint по умолчанию `/api/grist/labels/replace-all` (replace-all = одна партия; upsert = накопление).
 
 ---
 
@@ -87,6 +87,23 @@ export GRIST_API_KEY="..."
 ## 3. История изменений
 
 **Порядок: новые записи добавляются сверху, сразу после этого заголовка — самая последняя версия должна быть первой, самая старая — последней.** (До 2026-06-19 список был перемешан: записи до v0.11.0 шли по возрастанию, после — по убыванию; восстановлено руками один раз, дальше поддерживается этим правилом.)
+
+### v0.53.0 — feat: Keycloak PKCE auth (public client, S256, popup + silent iframe)
+
+- Удалён механизм LabelKeys / getAccessToken — Grist-таблица и автоключ больше не нужны
+- Добавлена полная цепочка PKCE: `_randB64url` / `_sha256B64url` / `_kcAuthUrl` / `_kcExchangeCode` / `_kcRefreshTokens` / `_kcSilentLogin` / `_kcPopupLogin` / `kcGetToken`
+- Issuer (realm URL) хранится в настройках (`grist.setOption('syncKcIssuer', ...)`); client_id = `gga1c-widget` захардкожен
+- Токены и code_verifier — только в памяти (`kcSession`), никогда в localStorage
+- При успехе токен отправляется в заголовке `X-Keycloak-Token: <id_token>`; API Key остаётся запасным путём (`Authorization: Bearer`)
+- Popup-редирект: страница с `?code=&state=` → `postMessage` → закрывается, основное окно забирает code
+- `DOMContentLoaded` защищён `if (_KC_CALLBACK) return;` — callback-экземпляр не инициализирует виджет
+- Настройки: поле Keycloak Issuer + подсказка со статусом сессии; поле API Key скрыто как запасной путь
+
+### v0.52.0 — feat: fetchTable-primary для продуктов, статус клиента в toast, verbatim 401
+
+- `loadProductsForFilter`: `fetchTable` — primary, `/sql` — fallback (SQL требует canCopyEverything)
+- Убрана зависимость от SQL для LabelKeys — читать через `fetchTable`
+- `syncLabels`: toast показывает `data.client` из ответа сервера; тело 401 выводится дословно
 
 ### v0.51.0 — feat: vendor-бандл, origin-check, умные ошибки синка, replace-all по умолчанию
 

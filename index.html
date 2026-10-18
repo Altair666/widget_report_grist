@@ -434,18 +434,23 @@
   </div>
   <div class="sp-body">
     <div class="sp-field">
-      <label>Server URL</label>
-      <input type="url" id="s-server-url" placeholder="https://your-server.example.com" />
+      <label>Keycloak Issuer</label>
+      <input type="url" id="s-kc-issuer" placeholder="http://192.168.88.238:8080/realms/test" />
+      <span class="sp-hint" id="s-kc-hint">Адрес реалма — общий, не секрет. Клиент: gga1c-widget</span>
     </div>
     <div class="sp-field">
-      <label>API Key</label>
-      <input type="password" id="s-api-key" placeholder="••••••••" />
-      <span class="sp-hint" id="s-autokey-hint"></span>
+      <label>Server URL</label>
+      <input type="url" id="s-server-url" placeholder="http://192.168.88.238:5080" />
     </div>
     <div class="sp-field">
       <label>Endpoint</label>
       <input type="text" id="s-endpoint" placeholder="/api/grist/labels/replace-all" />
-      <span class="sp-hint">Эндпоинт для синхронизации этикеток</span>
+      <span class="sp-hint">Замена буфера целиком. Накопление: /api/grist/labels/upsert</span>
+    </div>
+    <div class="sp-field">
+      <label style="color:var(--muted)">API Key <span style="font-weight:400;text-transform:none;font-size:10px">(запасной путь)</span></label>
+      <input type="password" id="s-api-key" placeholder="оставьте пустым, если Keycloak настроен" />
+      <span class="sp-hint">Используется только если Keycloak не настроен</span>
     </div>
   </div>
   <div class="sp-foot">
@@ -608,9 +613,27 @@
 
 <script>
 /* ====================================================================
+   KEYCLOAK CALLBACK INTERCEPTION — must run before any widget init.
+   When the popup/iframe returns to index.html?code=...&state=...,
+   forward the code to the opener/parent and stop all further init.
+   ==================================================================== */
+const _KC_CALLBACK = (() => {
+  const p = new URLSearchParams(location.search);
+  if (!p.has('code') || !p.has('state')) return false;
+  const msg = { type: 'kc-auth-code', code: p.get('code'), state: p.get('state') };
+  if (window.opener) {
+    try { window.opener.postMessage(msg, location.origin); } catch (e) {}
+    setTimeout(() => window.close(), 300);
+  } else {
+    try { window.parent.postMessage(msg, '*'); } catch (e) {}
+  }
+  return true;
+})();
+
+/* ====================================================================
    GLOBAL STATE
    ==================================================================== */
-const VERSION = 'v0.52.0';
+const VERSION = 'v0.53.0';
 
 // Grist table ids (service tables for templates / last-used filters).
 const TABLE_TEMPLATES = 'Report_template';
@@ -661,9 +684,7 @@ const state = {
   bpOptions: { modeIds: new Set(), orderIds: new Set() }, // distinct mode/order IDs for selected BP
   otkPerson: 'Л.Р. Боев',
   otkRole: 'Начальник ОТК',
-  syncSettings: { serverUrl: '', apiKey: '', endpoint: '/api/grist/labels/replace-all' },
-  autoApiKey: '',          // loaded from LabelKeys via fetchTable; '' if unavailable
-  autoApiKeyStatus: '',    // 'ok' | 'missing' | 'error'
+  syncSettings: { serverUrl: '', apiKey: '', endpoint: '/api/grist/labels/replace-all', kcIssuer: '' },
 };
 
 /* PDF.js worker */
@@ -2320,22 +2341,21 @@ function updateOtkDisplays() {
    SETTINGS PANEL
    ==================================================================== */
 function openSettings() {
+  $('#s-kc-issuer').value  = state.syncSettings.kcIssuer || '';
   $('#s-server-url').value = state.syncSettings.serverUrl;
   $('#s-api-key').value    = state.syncSettings.apiKey;
   $('#s-endpoint').value   = state.syncSettings.endpoint || '/api/grist/labels/replace-all';
-  const hint = $('#s-autokey-hint');
+  const hint = $('#s-kc-hint');
   if (hint) {
-    if (state.autoApiKeyStatus === 'ok') {
-      hint.textContent = '✓ ключ получен из таблицы LabelKeys — поле выше не нужно';
+    if (!state.syncSettings.kcIssuer) {
+      hint.textContent = 'Адрес реалма — общий, не секрет. Клиент: gga1c-widget';
+      hint.style.color = '';
+    } else if (kcSession && Date.now() < kcSession.expAt) {
+      hint.textContent = '✓ токен активен, вход не потребуется';
       hint.style.color = 'var(--ok)';
-    } else if (state.autoApiKeyStatus === 'missing') {
-      hint.textContent = 'таблица LabelKeys есть, но ваша строка не найдена — введите ключ выше';
-      hint.style.color = 'var(--danger)';
-    } else if (state.autoApiKeyStatus === 'error') {
-      hint.textContent = 'таблица LabelKeys не найдена — введите ключ выше';
-      hint.style.color = 'var(--muted)';
     } else {
-      hint.textContent = '';
+      hint.textContent = 'токен будет запрошен при первой синхронизации';
+      hint.style.color = 'var(--muted)';
     }
   }
   $('#settings-overlay').classList.add('on');
@@ -2355,12 +2375,15 @@ function saveSettings() {
     serverUrl: $('#s-server-url').value.trim().replace(/\/$/, ''),
     apiKey:    $('#s-api-key').value.trim(),
     endpoint:  ep,
+    kcIssuer:  $('#s-kc-issuer').value.trim().replace(/\/$/, ''),
   };
   state.syncSettings = s;
+  kcSession = null; // reset on settings change
   if (window.grist) {
     grist.setOption('syncServerUrl', s.serverUrl);
     grist.setOption('syncApiKey',    s.apiKey);
     grist.setOption('syncEndpoint',  s.endpoint);
+    grist.setOption('syncKcIssuer',  s.kcIssuer);
   }
   closeSettings();
   updateSyncButton();
@@ -2375,20 +2398,17 @@ function updateSyncButton() {
 }
 
 /* ====================================================================
-   SYNC — POST selected products to external SQLite proxy
+   SYNC — POST selected products to GGA1C hub
    ==================================================================== */
 async function syncLabels() {
-  const { serverUrl, endpoint } = state.syncSettings;
+  const { serverUrl, endpoint, apiKey, kcIssuer } = state.syncSettings;
   if (!serverUrl) { openSettings(); return; }
 
-  // Origin check — browser blocks cross-origin fetch (CORS / mixed-content).
+  // Origin check
   try {
     const target = new URL(serverUrl);
     if (target.origin !== location.origin) {
-      toast(
-        `Виджет открыт с ${location.origin}, сервер на ${target.origin} — браузер заблокирует запрос (CORS/https). Проверьте Server URL.`,
-        9000,
-      );
+      toast(`Виджет открыт с ${location.origin}, сервер на ${target.origin} — браузер заблокирует запрос (CORS). Проверьте Server URL.`, 9000);
       return;
     }
   } catch {
@@ -2396,10 +2416,28 @@ async function syncLabels() {
     return;
   }
 
-  // Use auto-key from LabelKeys table; fall back to manually entered key.
-  const effectiveKey = state.autoApiKey || state.syncSettings.apiKey;
-  if (!effectiveKey) {
-    toast('Нет API-ключа: откройте ⚙ и введите ключ либо убедитесь, что таблица LabelKeys настроена', 7000);
+  // Get Keycloak id_token (primary) or fall back to manual API key
+  let kcToken = null;
+  if (kcIssuer) {
+    const sub = $('#btn-sync-sub');
+    sub.textContent = 'вход…';
+    try {
+      kcToken = await kcGetToken();
+    } catch (e) {
+      if (e.message === 'popup-blocked') {
+        toast('Всплывающее окно заблокировано — разрешите popup для этого сайта', 7000);
+      } else if (e.message === 'popup-closed') {
+        toast('Авторизация отменена', 4000);
+      } else {
+        toast('Ошибка входа через Keycloak: ' + e.message, 7000);
+      }
+      sub.textContent = `${state.selectedProductIds.size} изделий`;
+      return;
+    }
+  }
+
+  if (!kcToken && !apiKey) {
+    toast('Нет аутентификации: настройте Keycloak Issuer или введите API Key в ⚙', 7000);
     return;
   }
 
@@ -2425,23 +2463,22 @@ async function syncLabels() {
   sub.textContent = 'отправка…';
 
   try {
-    const url = serverUrl + endpoint;
-    const resp = await withTimeout(fetch(url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${effectiveKey}`,
-      },
-      body: JSON.stringify({ items }),
+    const headers = { 'Content-Type': 'application/json' };
+    if (kcToken)       headers['X-Keycloak-Token'] = kcToken;
+    if (apiKey && !kcToken) headers['Authorization'] = `Bearer ${apiKey}`;
+
+    const resp = await withTimeout(fetch(serverUrl + endpoint, {
+      method: 'POST', headers, body: JSON.stringify({ items }),
     }), 30000);
 
     if (!resp.ok) {
       let msg;
       if (resp.status === 401) {
         const body = await resp.json().catch(() => null);
-        msg = `401: ${body?.error || 'ключ не принят'}`;
+        msg = body?.error || 'ключ/токен не принят';
+        kcSession = null; // force re-auth next time
       } else if (resp.status === 404 || resp.status === 405) {
-        msg = `неверный Endpoint (HTTP ${resp.status}): проверьте настройку`;
+        msg = `неверный Endpoint (HTTP ${resp.status})`;
       } else {
         const text = await resp.text().catch(() => '');
         msg = `HTTP ${resp.status}${text ? ': ' + text.slice(0, 200) : ''}`;
@@ -2454,7 +2491,7 @@ async function syncLabels() {
   } catch (e) {
     console.error('syncLabels failed:', e);
     if (e instanceof TypeError) {
-      toast('Запрос не ушёл: заблокирован браузером (origin/https) или сервер недоступен; проверьте Server URL и порт', 9000);
+      toast('Запрос не ушёл: заблокирован браузером (origin/https) или сервер недоступен', 9000);
     } else {
       toast('Ошибка синхронизации: ' + (e?.message || e).slice(0, 200), 8000);
     }
@@ -2527,27 +2564,115 @@ function bindEvents() {
 }
 
 /* ====================================================================
-   LABEL KEY — read from Grist LabelKeys table (access-filtered: only the
-   current user's own row is returned). Falls back to manually entered key.
+   KEYCLOAK PKCE AUTH (~40 lines, no external library)
    ==================================================================== */
-async function loadLabelKey() {
-  if (!state.gristFull) return;
+const KC_CLIENT_ID = 'gga1c-widget';
+const KC_SCOPE     = 'openid email profile';
+
+let kcSession  = null;   // { idToken, accessToken, refreshToken, expAt }
+let _pendingKc = null;   // { state, resolve, reject }
+
+function _randB64url(n) {
+  const b = new Uint8Array(n); crypto.getRandomValues(b);
+  return btoa(String.fromCharCode(...b)).replace(/\+/g,'-').replace(/\//g,'_').replace(/=/g,'');
+}
+async function _sha256B64url(s) {
+  const d = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s));
+  return btoa(String.fromCharCode(...new Uint8Array(d))).replace(/\+/g,'-').replace(/\//g,'_').replace(/=/g,'');
+}
+function _kcRedirectUri() { return location.origin + location.pathname; }
+function _kcIssuer()      { return (state.syncSettings.kcIssuer || '').replace(/\/$/, ''); }
+
+async function _kcAuthUrl(issuer, prompt) {
+  const verifier   = _randB64url(32);
+  const challenge  = await _sha256B64url(verifier);
+  const nonce      = _randB64url(16);
+  const url = issuer + '/protocol/openid-connect/auth?' + new URLSearchParams({
+    response_type: 'code', client_id: KC_CLIENT_ID, scope: KC_SCOPE,
+    redirect_uri: _kcRedirectUri(), code_challenge: challenge,
+    code_challenge_method: 'S256', state: nonce,
+    ...(prompt ? { prompt } : {}),
+  });
+  return { url, verifier, nonce };
+}
+async function _kcExchangeCode(issuer, code, verifier) {
+  const r = await fetch(issuer + '/protocol/openid-connect/token', {
+    method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({ grant_type: 'authorization_code', client_id: KC_CLIENT_ID,
+      code, redirect_uri: _kcRedirectUri(), code_verifier: verifier }),
+  });
+  if (!r.ok) throw new Error('KC token exchange: ' + r.status);
+  return r.json();
+}
+async function _kcRefreshTokens(issuer, refreshToken) {
+  const r = await fetch(issuer + '/protocol/openid-connect/token', {
+    method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({ grant_type: 'refresh_token',
+      client_id: KC_CLIENT_ID, refresh_token: refreshToken }),
+  });
+  if (!r.ok) throw new Error('KC refresh: ' + r.status);
+  return r.json();
+}
+function _storeKcTokens(t) {
+  kcSession = { idToken: t.id_token, accessToken: t.access_token,
+    refreshToken: t.refresh_token, expAt: Date.now() + (t.expires_in - 30) * 1000 };
+}
+
+// Receive auth code from popup / silent iframe
+window.addEventListener('message', e => {
+  if (!_pendingKc || e.data?.type !== 'kc-auth-code') return;
+  if (e.data.state !== _pendingKc.state) return;
+  _pendingKc.resolve(e.data.code);
+  _pendingKc = null;
+});
+
+function _waitKcCode(nonce) {
+  return new Promise((resolve, reject) => { _pendingKc = { state: nonce, resolve, reject }; });
+}
+
+async function _kcSilentLogin(issuer) {
+  const { url, verifier, nonce } = await _kcAuthUrl(issuer, 'none');
+  const iframe = Object.assign(document.createElement('iframe'),
+    { src: url, style: 'display:none' });
+  document.body.appendChild(iframe);
+  const codeP = _waitKcCode(nonce);
+  const timeout = new Promise((_, r) => setTimeout(() => {
+    if (_pendingKc?.state === nonce) { _pendingKc = null; }
+    r(new Error('silent-timeout'));
+  }, 4000));
   try {
-    const data = await withTimeout(grist.docApi.fetchTable('LabelKeys'), 6000);
-    // Access rules ensure only the user's own row arrives.
-    const keys = (data.api_key || []).filter(Boolean);
-    if (keys.length > 0) {
-      state.autoApiKey = String(keys[0]);
-      state.autoApiKeyStatus = 'ok';
-    } else {
-      state.autoApiKey = '';
-      state.autoApiKeyStatus = 'missing';
-    }
-  } catch (e) {
-    state.autoApiKey = '';
-    state.autoApiKeyStatus = 'error';
-    console.warn('loadLabelKey failed:', e);
+    const code = await Promise.race([codeP, timeout]);
+    return await _kcExchangeCode(issuer, code, verifier);
+  } finally { iframe.remove(); }
+}
+
+async function _kcPopupLogin(issuer) {
+  const { url, verifier, nonce } = await _kcAuthUrl(issuer);
+  const popup = window.open(url, 'kc-login', 'width=520,height=640,toolbar=0,menubar=0');
+  if (!popup) throw new Error('popup-blocked');
+  const codeP = _waitKcCode(nonce);
+  const closed = new Promise((_, r) => {
+    const t = setInterval(() => { if (popup.closed) { clearInterval(t);
+      if (_pendingKc?.state === nonce) { _pendingKc = null; r(new Error('popup-closed')); }
+    }}, 500);
+  });
+  const code = await Promise.race([codeP, closed]);
+  popup.close();
+  return await _kcExchangeCode(issuer, code, verifier);
+}
+
+async function kcGetToken() {
+  const issuer = _kcIssuer();
+  if (!issuer) throw new Error('Keycloak Issuer не настроен — откройте ⚙');
+  if (kcSession && Date.now() < kcSession.expAt) return kcSession.idToken;
+  if (kcSession?.refreshToken) {
+    try { _storeKcTokens(await _kcRefreshTokens(issuer, kcSession.refreshToken)); return kcSession.idToken; }
+    catch { kcSession = null; }
   }
+  try { _storeKcTokens(await _kcSilentLogin(issuer)); return kcSession.idToken; }
+  catch { /* fall through to popup */ }
+  _storeKcTokens(await _kcPopupLogin(issuer));
+  return kcSession.idToken;
 }
 
 /* ====================================================================
@@ -2564,12 +2689,12 @@ async function initGrist() {
         serverUrl: opts.syncServerUrl || '',
         apiKey:    opts.syncApiKey    || '',
         endpoint:  opts.syncEndpoint  || '/api/grist/labels/replace-all',
+        kcIssuer:  opts.syncKcIssuer  || '',
       };
       updateSyncButton();
     });
   }
 
-  await loadLabelKey();
   await refreshTemplates();
   await refreshLastFilters();
   await refreshCatalog();
@@ -2581,6 +2706,8 @@ async function initGrist() {
    BOOT
    ==================================================================== */
 document.addEventListener('DOMContentLoaded', () => {
+  if (_KC_CALLBACK) return; // this page instance is just the OAuth redirect handler
+
   document.getElementById('version-badge').textContent = VERSION;
   document.title = `Widget Report — Grist (${VERSION})`;
   console.log(`%cwidget_report_grist ${VERSION}`, 'color:#2f6feb;font-weight:bold');
