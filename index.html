@@ -440,6 +440,7 @@
     <div class="sp-field">
       <label>API Key</label>
       <input type="password" id="s-api-key" placeholder="••••••••" />
+      <span class="sp-hint" id="s-autokey-hint"></span>
     </div>
     <div class="sp-field">
       <label>Endpoint</label>
@@ -609,7 +610,7 @@
 /* ====================================================================
    GLOBAL STATE
    ==================================================================== */
-const VERSION = 'v0.51.0';
+const VERSION = 'v0.52.0';
 
 // Grist table ids (service tables for templates / last-used filters).
 const TABLE_TEMPLATES = 'Report_template';
@@ -661,6 +662,8 @@ const state = {
   otkPerson: 'Л.Р. Боев',
   otkRole: 'Начальник ОТК',
   syncSettings: { serverUrl: '', apiKey: '', endpoint: '/api/grist/labels/replace-all' },
+  autoApiKey: '',          // loaded from LabelKeys via fetchTable; '' if unavailable
+  autoApiKeyStatus: '',    // 'ok' | 'missing' | 'error'
 };
 
 /* PDF.js worker */
@@ -1243,11 +1246,13 @@ async function loadProductsViaFetch(basicPlatformId, { partId, modeId, orderId }
 }
 
 async function loadProductsForFilter(basicPlatformId, filters) {
+  // fetchTable is primary: /sql requires canCopyEverything and fails for
+  // restricted users with 403. Fall back to SQL only if fetchTable fails.
   try {
-    return await loadProductsViaSql(basicPlatformId, filters);
-  } catch (e) {
-    console.warn('Products via SQL failed, falling back to fetchTable', e);
     return await loadProductsViaFetch(basicPlatformId, filters);
+  } catch (e) {
+    console.warn('Products via fetchTable failed, falling back to SQL', e);
+    return await loadProductsViaSql(basicPlatformId, filters);
   }
 }
 
@@ -2318,6 +2323,21 @@ function openSettings() {
   $('#s-server-url').value = state.syncSettings.serverUrl;
   $('#s-api-key').value    = state.syncSettings.apiKey;
   $('#s-endpoint').value   = state.syncSettings.endpoint || '/api/grist/labels/replace-all';
+  const hint = $('#s-autokey-hint');
+  if (hint) {
+    if (state.autoApiKeyStatus === 'ok') {
+      hint.textContent = '✓ ключ получен из таблицы LabelKeys — поле выше не нужно';
+      hint.style.color = 'var(--ok)';
+    } else if (state.autoApiKeyStatus === 'missing') {
+      hint.textContent = 'таблица LabelKeys есть, но ваша строка не найдена — введите ключ выше';
+      hint.style.color = 'var(--danger)';
+    } else if (state.autoApiKeyStatus === 'error') {
+      hint.textContent = 'таблица LabelKeys не найдена — введите ключ выше';
+      hint.style.color = 'var(--muted)';
+    } else {
+      hint.textContent = '';
+    }
+  }
   $('#settings-overlay').classList.add('on');
   $('#settings-panel').classList.add('on');
 }
@@ -2358,10 +2378,10 @@ function updateSyncButton() {
    SYNC — POST selected products to external SQLite proxy
    ==================================================================== */
 async function syncLabels() {
-  const { serverUrl, apiKey, endpoint } = state.syncSettings;
+  const { serverUrl, endpoint } = state.syncSettings;
   if (!serverUrl) { openSettings(); return; }
 
-  // Task 2: origin check — browser will block cross-origin fetch (CORS / mixed-content).
+  // Origin check — browser blocks cross-origin fetch (CORS / mixed-content).
   try {
     const target = new URL(serverUrl);
     if (target.origin !== location.origin) {
@@ -2373,6 +2393,13 @@ async function syncLabels() {
     }
   } catch {
     toast('Некорректный Server URL', 4000);
+    return;
+  }
+
+  // Use auto-key from LabelKeys table; fall back to manually entered key.
+  const effectiveKey = state.autoApiKey || state.syncSettings.apiKey;
+  if (!effectiveKey) {
+    toast('Нет API-ключа: откройте ⚙ и введите ключ либо убедитесь, что таблица LabelKeys настроена', 7000);
     return;
   }
 
@@ -2403,16 +2430,16 @@ async function syncLabels() {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}`,
+        'Authorization': `Bearer ${effectiveKey}`,
       },
       body: JSON.stringify({ items }),
     }), 30000);
 
     if (!resp.ok) {
-      // Task 4: discriminate server-side errors
       let msg;
       if (resp.status === 401) {
-        msg = 'ключ не принят (401): перевыпустите в интерфейсе сервиса и вставьте заново';
+        const body = await resp.json().catch(() => null);
+        msg = `401: ${body?.error || 'ключ не принят'}`;
       } else if (resp.status === 404 || resp.status === 405) {
         msg = `неверный Endpoint (HTTP ${resp.status}): проверьте настройку`;
       } else {
@@ -2421,10 +2448,11 @@ async function syncLabels() {
       }
       throw new Error(msg);
     }
-    toast(`Синхронизировано ${items.length} изделий`);
+    const data = await resp.json().catch(() => null);
+    const clientSuffix = data?.client ? ` (${data.client})` : '';
+    toast(`Синхронизировано ${items.length} изделий${clientSuffix}`);
   } catch (e) {
     console.error('syncLabels failed:', e);
-    // Task 4: distinguish network block from server error
     if (e instanceof TypeError) {
       toast('Запрос не ушёл: заблокирован браузером (origin/https) или сервер недоступен; проверьте Server URL и порт', 9000);
     } else {
@@ -2499,6 +2527,30 @@ function bindEvents() {
 }
 
 /* ====================================================================
+   LABEL KEY — read from Grist LabelKeys table (access-filtered: only the
+   current user's own row is returned). Falls back to manually entered key.
+   ==================================================================== */
+async function loadLabelKey() {
+  if (!state.gristFull) return;
+  try {
+    const data = await withTimeout(grist.docApi.fetchTable('LabelKeys'), 6000);
+    // Access rules ensure only the user's own row arrives.
+    const keys = (data.api_key || []).filter(Boolean);
+    if (keys.length > 0) {
+      state.autoApiKey = String(keys[0]);
+      state.autoApiKeyStatus = 'ok';
+    } else {
+      state.autoApiKey = '';
+      state.autoApiKeyStatus = 'missing';
+    }
+  } catch (e) {
+    state.autoApiKey = '';
+    state.autoApiKeyStatus = 'error';
+    console.warn('loadLabelKey failed:', e);
+  }
+}
+
+/* ====================================================================
    GRIST INTEGRATION
    ==================================================================== */
 async function initGrist() {
@@ -2517,6 +2569,7 @@ async function initGrist() {
     });
   }
 
+  await loadLabelKey();
   await refreshTemplates();
   await refreshLastFilters();
   await refreshCatalog();
