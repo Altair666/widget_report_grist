@@ -10,8 +10,9 @@
 - **Репозиторий:** https://github.com/Altair666/widget_report_grist
 - **Live (GitHub Pages):** https://altair666.github.io/widget_report_grist/
 - **Целевой Grist-документ:** `db.mp-lab.ru`, организация `mp-lab`, документ **«LMP данные изделий»** (id `48G8NAEGKuLnpgBo36bWHM`). Уточнено 2026-06-19 через Grist API (read-only) — там же лежат `Report_template`/`Report_last_filter` (см. §5) и каталог изделий `Basic_platforms`/`Parts`/`Modifications`/`Orders`/`Products` (см. §6). Старое указание на `lmp-test-dec.getgrist.com/5GtDphApyrjG` было устаревшим/неверным — не использовать.
-- **Текущая версия:** `v0.50.0`
-- **Стек:** один `index.html` (HTML + CSS + vanilla JS), `pdf.js` с CDN, `grist-plugin-api.js` с CDN.
+- **Текущая версия:** `v0.51.0`
+- **Стек:** один `index.html` (HTML + CSS + vanilla JS), библиотеки bundled в `vendor/` (pdf.js 3.11.174, pdf-lib 1.17.1, fontkit 1.1.1), `grist-plugin-api.js` с `db.mp-lab.ru` (внутренняя сеть, не трогать).
+- **Сервис синхронизации (2026-10):** GGA1C.Sync (Altair666/Jumper-GGA1C, стенд http://192.168.88.238:5080). Контракт: POST `{"items":[{date,product_code,mode_code,external_id,...}]}`, ключ в `Authorization: Bearer`. Endpoint по умолчанию `/api/grist/labels/replace-all` (replace-all = одна партия; upsert = накопление).
 
 ---
 
@@ -86,6 +87,20 @@ export GRIST_API_KEY="..."
 ## 3. История изменений
 
 **Порядок: новые записи добавляются сверху, сразу после этого заголовка — самая последняя версия должна быть первой, самая старая — последней.** (До 2026-06-19 список был перемешан: записи до v0.11.0 шли по возрастанию, после — по убыванию; восстановлено руками один раз, дальше поддерживается этим правилом.)
+
+### v0.51.0 — feat: vendor-бандл, origin-check, умные ошибки синка, replace-all по умолчанию
+
+- `vendor/` — pdf.js 3.11.174, pdf-lib 1.17.1, fontkit 1.1.1 положены в репо, подключаются
+  относительными путями (без cdnjs/jsdelivr). workerSrc тоже локальный.
+  grist-plugin-api.js с db.mp-lab.ru не трогается.
+- Origin check в syncLabels: если origin serverUrl ≠ origin виджета — toast с объяснением,
+  не отправляем fetch (браузер всё равно заблокирует).
+- Endpoint по умолчанию везде заменён на `/api/grist/labels/replace-all`
+  (state, openSettings, grist.onOptions, placeholder). saveSettings проверяет суффикс
+  (`/upsert` или `/replace-all`), при неверном — подсказка без сохранения.
+- Различение ошибок синхронизации: TypeError → браузер заблокировал / сервер недоступен;
+  401 → ключ не принят; 404/405 → неверный endpoint; прочее → код + первые 200 байт тела.
+- external_id: String(p.id) в каждом элементе items — Grist row ID для точного upsert/delete.
 
 ### v0.50.0 — fix: кнопка шестерёнки перенесена внутрь панели «Последние фильтры»
 
