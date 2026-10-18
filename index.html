@@ -8,9 +8,9 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500&display=swap" rel="stylesheet">
 <script src="https://db.mp-lab.ru/grist-plugin-api.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@pdf-lib/fontkit@1.1.1/dist/fontkit.umd.min.js"></script>
+<script src="vendor/pdf.min.js"></script>
+<script src="vendor/pdf-lib.min.js"></script>
+<script src="vendor/fontkit.umd.min.js"></script>
 <style>
   :root {
     --bg: #f4f6f8;
@@ -443,7 +443,7 @@
     </div>
     <div class="sp-field">
       <label>Endpoint</label>
-      <input type="text" id="s-endpoint" placeholder="/api/grist/labels/upsert" />
+      <input type="text" id="s-endpoint" placeholder="/api/grist/labels/replace-all" />
       <span class="sp-hint">Эндпоинт для синхронизации этикеток</span>
     </div>
   </div>
@@ -609,7 +609,7 @@
 /* ====================================================================
    GLOBAL STATE
    ==================================================================== */
-const VERSION = 'v0.50.0';
+const VERSION = 'v0.51.0';
 
 // Grist table ids (service tables for templates / last-used filters).
 const TABLE_TEMPLATES = 'Report_template';
@@ -660,13 +660,12 @@ const state = {
   bpOptions: { modeIds: new Set(), orderIds: new Set() }, // distinct mode/order IDs for selected BP
   otkPerson: 'Л.Р. Боев',
   otkRole: 'Начальник ОТК',
-  syncSettings: { serverUrl: '', apiKey: '', endpoint: '/api/grist/labels/upsert' },
+  syncSettings: { serverUrl: '', apiKey: '', endpoint: '/api/grist/labels/replace-all' },
 };
 
 /* PDF.js worker */
 if (window.pdfjsLib) {
-  pdfjsLib.GlobalWorkerOptions.workerSrc =
-    'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+  pdfjsLib.GlobalWorkerOptions.workerSrc = 'vendor/pdf.worker.min.js';
 }
 
 /* ====================================================================
@@ -2318,7 +2317,7 @@ function updateOtkDisplays() {
 function openSettings() {
   $('#s-server-url').value = state.syncSettings.serverUrl;
   $('#s-api-key').value    = state.syncSettings.apiKey;
-  $('#s-endpoint').value   = state.syncSettings.endpoint || '/api/grist/labels/upsert';
+  $('#s-endpoint').value   = state.syncSettings.endpoint || '/api/grist/labels/replace-all';
   $('#settings-overlay').classList.add('on');
   $('#settings-panel').classList.add('on');
 }
@@ -2327,10 +2326,15 @@ function closeSettings() {
   $('#settings-panel').classList.remove('on');
 }
 function saveSettings() {
+  const ep = $('#s-endpoint').value.trim() || '/api/grist/labels/replace-all';
+  if (!ep.endsWith('/upsert') && !ep.endsWith('/replace-all')) {
+    toast('Endpoint должен заканчиваться на /upsert или /replace-all', 6000);
+    return;
+  }
   const s = {
     serverUrl: $('#s-server-url').value.trim().replace(/\/$/, ''),
     apiKey:    $('#s-api-key').value.trim(),
-    endpoint:  $('#s-endpoint').value.trim() || '/api/grist/labels/upsert',
+    endpoint:  ep,
   };
   state.syncSettings = s;
   if (window.grist) {
@@ -2357,6 +2361,21 @@ async function syncLabels() {
   const { serverUrl, apiKey, endpoint } = state.syncSettings;
   if (!serverUrl) { openSettings(); return; }
 
+  // Task 2: origin check — browser will block cross-origin fetch (CORS / mixed-content).
+  try {
+    const target = new URL(serverUrl);
+    if (target.origin !== location.origin) {
+      toast(
+        `Виджет открыт с ${location.origin}, сервер на ${target.origin} — браузер заблокирует запрос (CORS/https). Проверьте Server URL.`,
+        9000,
+      );
+      return;
+    }
+  } catch {
+    toast('Некорректный Server URL', 4000);
+    return;
+  }
+
   const selectedIds = [...state.selectedProductIds];
   if (!selectedIds.length) { toast('Выберите хотя бы одно изделие'); return; }
 
@@ -2369,6 +2388,7 @@ async function syncLabels() {
       date:         dateText,
       product_code: p.productCode || '',
       mode_code:    modMap.get(p.modeId)?.code || '',
+      external_id:  String(p.id),
     }));
 
   const btn = $('#btn-sync');
@@ -2389,13 +2409,27 @@ async function syncLabels() {
     }), 30000);
 
     if (!resp.ok) {
-      const text = await resp.text().catch(() => '');
-      throw new Error(`HTTP ${resp.status}${text ? ': ' + text.slice(0, 120) : ''}`);
+      // Task 4: discriminate server-side errors
+      let msg;
+      if (resp.status === 401) {
+        msg = 'ключ не принят (401): перевыпустите в интерфейсе сервиса и вставьте заново';
+      } else if (resp.status === 404 || resp.status === 405) {
+        msg = `неверный Endpoint (HTTP ${resp.status}): проверьте настройку`;
+      } else {
+        const text = await resp.text().catch(() => '');
+        msg = `HTTP ${resp.status}${text ? ': ' + text.slice(0, 200) : ''}`;
+      }
+      throw new Error(msg);
     }
     toast(`Синхронизировано ${items.length} изделий`);
   } catch (e) {
     console.error('syncLabels failed:', e);
-    toast('Ошибка синхронизации: ' + (e?.message || e).slice(0, 100), 6000);
+    // Task 4: distinguish network block from server error
+    if (e instanceof TypeError) {
+      toast('Запрос не ушёл: заблокирован браузером (origin/https) или сервер недоступен; проверьте Server URL и порт', 9000);
+    } else {
+      toast('Ошибка синхронизации: ' + (e?.message || e).slice(0, 200), 8000);
+    }
   } finally {
     btn.classList.remove('syncing');
     sub.textContent = origSub;
@@ -2477,7 +2511,7 @@ async function initGrist() {
       state.syncSettings = {
         serverUrl: opts.syncServerUrl || '',
         apiKey:    opts.syncApiKey    || '',
-        endpoint:  opts.syncEndpoint  || '/api/grist/labels/upsert',
+        endpoint:  opts.syncEndpoint  || '/api/grist/labels/replace-all',
       };
       updateSyncButton();
     });
